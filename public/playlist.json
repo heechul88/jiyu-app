@@ -1,0 +1,73 @@
+[
+  {
+    "id": "nas-mp4-1",
+    "title": "우리집 캠코더 영상 01",
+    "type": "file",
+    "url": "https://dnabi.co.kr/movies/22.mp4",
+    "thumb": "https://nas.example.com/thumbs/family_2024_01.jpg",
+    "tags": ["NAS", "MP4"]
+  },
+  {
+    "id": "nas-hls-1",
+    "title": "드론 촬영 (HLS)",
+    "type": "hls",
+    "url": "https://dnabi.co.kr/movies/22.mp4",
+    "tags": ["NAS", "HLS"]
+  },
+  {
+    "id": "yt-1",
+    "title": "YouTube: 바다 풍경 4K",
+    "type": "youtube",
+    "youtubeId": "Scxs7L0vhZ4",
+    "tags": ["YouTube", "4K"]
+  },
+  {
+    "id": "yt-2",
+    "title": "YouTube: 코딩 뮤직",
+    "type": "youtube",
+    "youtubeId": "qoT8L9eiPMI",
+    "tags": ["YouTube", "LoFi"]
+  },
+  {
+    "id": "yt-3",
+    "title": "YouTube: 코딩 뮤직",
+    "type": "youtube",
+    "youtubeId": "jfKfPfyJRdk",
+    "tags": ["YouTube", "LoFi"]
+  },
+  {
+    "id": "yt-4",
+    "title": "YouTube: 코딩 뮤직",
+    "type": "youtube",
+    "youtubeId": "jfKfPfyJRdk",
+    "tags": ["YouTube", "LoFi"]
+  },
+  {
+    "id": "yt-5",
+    "title": "YouTube: 코딩 뮤직",
+    "type": "youtube",
+    "youtubeId": "jfKfPfyJRdk",
+    "tags": ["YouTube", "LoFi"]
+  },
+  {
+    "id": "yt-6",
+    "title": "YouTube: 코딩 뮤직",
+    "type": "youtube",
+    "youtubeId": "jfKfPfyJRdk",
+    "tags": ["YouTube", "LoFi"]
+  },
+  {
+    "id": "yt-7",
+    "title": "YouTube: 코딩 뮤직",
+    "type": "youtube",
+    "youtubeId": "jfKfPfyJRdk",
+    "tags": ["YouTube", "LoFi"]
+  },
+  {
+    "id": "yt-8",
+    "title": "YouTube: 코딩 뮤직",
+    "type": "youtube",
+    "youtubeId": "jfKfPfyJRdk",
+    "tags": ["YouTube", "LoFi"]
+  }
+]
