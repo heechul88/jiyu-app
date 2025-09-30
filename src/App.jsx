@@ -74,6 +74,19 @@ function Badge({ children }) {
     return <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 border">{children}</span>;
 }
 
+// 재생중 표시 아이콘 (깜빡이는 그린 도트)
+function NowPlayingIcon() {
+    return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-600">
+      <span className="relative inline-flex h-2.5 w-2.5">
+        <span className="absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75 animate-ping"></span>
+        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+      </span>
+      재생중
+    </span>
+    );
+}
+
 function SearchBox({ value, onChange }) {
     return (
         <div className="flex items-center gap-2 p-2 border rounded-xl bg-white shadow-sm">
@@ -106,7 +119,7 @@ function LoginGate({ onPass }) {
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4 w-full">
+        <div className="min-h-[100dvh] w-screen flex items-center justify-center bg-gray-50 p-4">
             <form onSubmit={submit} className="w-full max-w-md bg-white rounded-2xl border shadow p-6 space-y-4">
                 <h1 className="text-xl font-bold">영상 재생 앱 로그인</h1>
                 <div className="space-y-2">
@@ -165,35 +178,60 @@ export default function App() {
         if (nid && (!current || nid !== current.id)) setCurrentId(nid);
     }
 
-    // --- YouTube IFrame API 초기화 및 상태 감시 ---
+    // --- YouTube IFrame API 초기화/생명주기 ---
+    // (1) 유튜브 탭에 들어올 때 1회 생성, 탭을 벗어날 때만 destroy
+    const ytReadyRef = useRef(false);
     useEffect(() => {
         if (!(current && current.type === "youtube")) {
-            // 유튜브에서 벗어나면 기존 플레이어 정리
+            // 유튜브 탭이 아니면 플레이어 정리 후 종료
             if (ytPlayerRef.current && ytPlayerRef.current.destroy) {
                 try { ytPlayerRef.current.destroy(); } catch {}
                 ytPlayerRef.current = null;
+                ytReadyRef.current = false;
             }
             return;
         }
 
+        function bindEnded(player) {
+            try {
+                player.addEventListener("onStateChange", (e) => {
+                    // 0: ENDED, 1: PLAYING, 2: PAUSED, 3: BUFFERING, 5: CUED
+                    if (e.data === window.YT.PlayerState.ENDED) {
+                        // 다음 트랙으로
+                        setTimeout(() => handleEnded(), 0);
+                    }
+                });
+            } catch {}
+        }
+
         function createPlayer() {
-            if (ytPlayerRef.current && ytPlayerRef.current.loadVideoById) {
-                // 이미 있으면 영상만 교체
-                ytPlayerRef.current.loadVideoById(current.youtubeId);
-                return;
-            }
             ytPlayerRef.current = new window.YT.Player("yt-player", {
                 videoId: current.youtubeId,
+                playerVars: {
+                    autoplay: 1,
+                    controls: 1,
+                    rel: 0,
+                    modestbranding: 1,
+                    playsinline: 1,
+                    origin: window.location.origin,
+                },
                 events: {
-                    onStateChange: (e) => {
-                        if (e.data === window.YT.PlayerState.ENDED) handleEnded();
+                    onReady: (e) => {
+                        ytReadyRef.current = true;
+                        try { e.target.playVideo(); } catch {}
+                    },
+                    onError: () => {
+                        // 에러 시에도 다음으로 진행
+                        handleEnded();
                     },
                 },
             });
+            bindEnded(ytPlayerRef.current);
         }
 
+        // IFrame API 준비
         if (window.YT && window.YT.Player) {
-            createPlayer();
+            if (!ytPlayerRef.current) createPlayer();
         } else {
             if (!document.getElementById("yt-iframe-api")) {
                 const tag = document.createElement("script");
@@ -204,18 +242,30 @@ export default function App() {
             const prev = window.onYouTubeIframeAPIReady;
             window.onYouTubeIframeAPIReady = function () {
                 if (typeof prev === "function") try { prev(); } catch {}
-                createPlayer();
+                if (!ytPlayerRef.current) createPlayer();
             };
         }
 
         return () => {
-            // 언마운트/전환 시 정리 (다음 마운트에서 새 플레이어 생성)
-            if (ytPlayerRef.current && ytPlayerRef.current.destroy) {
+            // 유튜브 탭을 벗어나는 경우에만 실제 destroy (current 변경에는 destroy 금지)
+            const stillYoutube = current && current.type === "youtube";
+            if (!stillYoutube && ytPlayerRef.current && ytPlayerRef.current.destroy) {
                 try { ytPlayerRef.current.destroy(); } catch {}
                 ytPlayerRef.current = null;
+                ytReadyRef.current = false;
             }
         };
-    }, [current]);
+    }, [tab]);
+
+    // (2) 같은 탭 내에서 영상만 바뀌는 경우엔 loadVideoById로 교체
+    useEffect(() => {
+        if (!(current && current.type === "youtube")) return;
+        const p = ytPlayerRef.current;
+        if (p && typeof p.loadVideoById === "function") {
+            try { p.loadVideoById(current.youtubeId); } catch {}
+            try { p.playVideo && p.playVideo(); } catch {}
+        }
+    }, [current && current.type === "youtube" ? current.youtubeId : null]);
 
     useEffect(() => {
         if (!current && items.length) setCurrentId(items[0].id);
@@ -224,7 +274,7 @@ export default function App() {
     if (!authed) return <LoginGate onPass={() => setAuthed(true)} />;
 
     return (
-        <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8 w-full">
+        <div className="min-h-[100dvh] w-screen bg-gray-50 p-3 sm:p-4 lg:p-6">
             <div className="w-full space-y-4">
                 <header className="flex flex-wrap items-center justify-between gap-3">
                     <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold">내 영상 플레이어</h1>
@@ -272,7 +322,7 @@ export default function App() {
 
                     <aside className="space-y-3">
                         <SearchBox value={query} onChange={setQuery} />
-                        <div className="h-[40vh] lg:h-[70vh] overflow-auto rounded-2xl border bg-white divide-y">
+                        <div className="overflow-auto rounded-2xl border bg-white divide-y h-[calc(100dvh-260px)] sm:h-[calc(100dvh-250px)] lg:h-[calc(100dvh-240px)]">
                             {loading && <div className="p-6 text-sm">불러오는 중…</div>}
                             {!loading && error && <div className="p-6 text-sm text-red-600">{error}</div>}
                             {!loading && !error && items.map((item) => {
@@ -281,8 +331,14 @@ export default function App() {
                                 return (
                                     <button
                                         key={item.id}
+                                        aria-current={active ? "true" : "false"}
+                                        title={active ? "현재 재생중" : "재생"}
                                         onClick={() => setCurrentId(item.id)}
-                                        className={`w-full flex gap-3 items-center p-3 ${active ? "bg-gray-100" : "hover:bg-gray-50"}`}
+                                        className={`w-full flex gap-3 items-center p-3 pl-2 transition ${
+                                            active
+                                                ? "bg-green-50 border-l-4 border-green-500"
+                                                : "hover:bg-gray-50 border-l-4 border-transparent"
+                                        }`}
                                     >
                                         <div className="w-20 h-14 sm:w-24 sm:h-16 md:w-28 md:h-20 rounded bg-gray-100 overflow-hidden">
                                             {thumb ? (
@@ -292,7 +348,10 @@ export default function App() {
                                             )}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <div className="font-medium truncate">{item.title}</div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="font-medium truncate">{item.title}</div>
+                                                {active && <NowPlayingIcon />}
+                                            </div>
                                             <div className="text-xs text-gray-500 flex gap-2 mt-0.5">
                                                 <span>{(item.type || "").toUpperCase()}</span>
                                                 {(item.tags || []).slice(0, 3).map((t) => <Badge key={t}>#{t}</Badge>)}
