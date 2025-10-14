@@ -158,16 +158,25 @@ export default function App() {
     }, []);
 
     const items = useMemo(() => {
+        if (!Array.isArray(playlist)) return [];
+        
         const q = query.trim().toLowerCase();
-        return playlist
+        const filteredItems = playlist
+            .filter((v) => v && typeof v === 'object') // 유효한 객체만 필터링
             .filter((v) => (tab === "youtube" ? v.type === "youtube" : v.type === "file" || v.type === "hls"))
             .filter((v) => {
                 if (!q) return true;
                 return (v.title || "").toLowerCase().includes(q) || (v.tags || []).some((t) => (t || "").toLowerCase().includes(q));
             });
+        
+        return filteredItems;
     }, [tab, query, playlist]);
 
-    const current = useMemo(() => items.find((v) => v.id === currentId) || items[0], [items, currentId]);
+    const current = useMemo(() => {
+        if (!items || items.length === 0) return null;
+        if (!currentId) return items[0];
+        return items.find((v) => v && v.id === currentId) || items[0];
+    }, [items, currentId]);
 
     function handleEnded() {
         if (repeatOne && videoRef.current) {
@@ -179,11 +188,11 @@ export default function App() {
     }
 
     // --- YouTube IFrame API 초기화/생명주기 ---
-    // (1) 유튜브 탭에 들어올 때 1회 생성, 탭을 벗어날 때만 destroy
     const ytReadyRef = useRef(false);
+    
     useEffect(() => {
-        if (!(current && current.type === "youtube")) {
-            // 유튜브 탭이 아니면 플레이어 정리 후 종료
+        // 탭이 youtube가 아니면 플레이어 정리
+        if (tab !== "youtube") {
             if (ytPlayerRef.current && ytPlayerRef.current.destroy) {
                 try { ytPlayerRef.current.destroy(); } catch {}
                 ytPlayerRef.current = null;
@@ -192,64 +201,25 @@ export default function App() {
             return;
         }
 
-        function bindEnded(player) {
-            try {
-                player.addEventListener("onStateChange", (e) => {
-                    // 0: ENDED, 1: PLAYING, 2: PAUSED, 3: BUFFERING, 5: CUED
-                    if (e.data === window.YT.PlayerState.ENDED) {
-                        // 다음 트랙으로
-                        setTimeout(() => handleEnded(), 0);
-                    }
-                });
-            } catch {}
-        }
-
-        function createPlayer() {
-            ytPlayerRef.current = new window.YT.Player("yt-player", {
-                videoId: current.youtubeId,
-                playerVars: {
-                    autoplay: 1,
-                    controls: 1,
-                    rel: 0,
-                    modestbranding: 1,
-                    playsinline: 1,
-                    origin: window.location.origin,
-                },
-                events: {
-                    onReady: (e) => {
-                        ytReadyRef.current = true;
-                        try { e.target.playVideo(); } catch {}
-                    },
-                    onError: () => {
-                        // 에러 시에도 다음으로 진행
-                        handleEnded();
-                    },
-                },
-            });
-            bindEnded(ytPlayerRef.current);
-        }
-
-        // IFrame API 준비
-        if (window.YT && window.YT.Player) {
-            if (!ytPlayerRef.current) createPlayer();
-        } else {
+        // YouTube IFrame API 로드
+        if (!window.YT) {
             if (!document.getElementById("yt-iframe-api")) {
                 const tag = document.createElement("script");
                 tag.id = "yt-iframe-api";
                 tag.src = "https://www.youtube.com/iframe_api";
                 document.body.appendChild(tag);
             }
-            const prev = window.onYouTubeIframeAPIReady;
+            
             window.onYouTubeIframeAPIReady = function () {
-                if (typeof prev === "function") try { prev(); } catch {}
-                if (!ytPlayerRef.current) createPlayer();
+                console.log("YouTube API 로드 완료");
+                ytReadyRef.current = true;
             };
+        } else {
+            ytReadyRef.current = true;
         }
 
         return () => {
-            // 유튜브 탭을 벗어나는 경우에만 실제 destroy (current 변경에는 destroy 금지)
-            const stillYoutube = current && current.type === "youtube";
-            if (!stillYoutube && ytPlayerRef.current && ytPlayerRef.current.destroy) {
+            if (tab !== "youtube" && ytPlayerRef.current && ytPlayerRef.current.destroy) {
                 try { ytPlayerRef.current.destroy(); } catch {}
                 ytPlayerRef.current = null;
                 ytReadyRef.current = false;
@@ -257,19 +227,87 @@ export default function App() {
         };
     }, [tab]);
 
-    // (2) 같은 탭 내에서 영상만 바뀌는 경우엔 loadVideoById로 교체
+    // YouTube 플레이어 생성 및 업데이트
     useEffect(() => {
-        if (!(current && current.type === "youtube")) return;
-        const p = ytPlayerRef.current;
-        if (p && typeof p.loadVideoById === "function") {
-            try { p.loadVideoById(current.youtubeId); } catch {}
-            try { p.playVideo && p.playVideo(); } catch {}
-        }
+        if (!(current && current.type === "youtube" && current.youtubeId)) return;
+        if (!window.YT || !ytReadyRef.current) return;
+
+        const createPlayer = () => {
+            try {
+                if (ytPlayerRef.current && ytPlayerRef.current.destroy) {
+                    ytPlayerRef.current.destroy();
+                }
+                
+                ytPlayerRef.current = new window.YT.Player("yt-player", {
+                    videoId: current.youtubeId,
+                    playerVars: {
+                        autoplay: 0, // 브라우저 정책으로 인해 0으로 설정
+                        controls: 1,
+                        rel: 0,
+                        modestbranding: 1,
+                        playsinline: 1,
+                        origin: window.location.origin,
+                        mute: 0, // 음소거 해제
+                    },
+                    events: {
+                        onReady: (e) => {
+                            console.log("YouTube 플레이어 준비 완료:", current.youtubeId);
+                            // 준비 완료 후 재생 시도
+                            setTimeout(() => {
+                                try {
+                                    e.target.playVideo();
+                                } catch (error) {
+                                    console.log("자동 재생 실패, 사용자 상호작용 필요:", error);
+                                }
+                            }, 500);
+                        },
+                        onStateChange: (e) => {
+                            console.log("YouTube 플레이어 상태 변경:", e.data);
+                            // 0: ENDED, 1: PLAYING, 2: PAUSED, 3: BUFFERING, 5: CUED
+                            if (e.data === window.YT.PlayerState.ENDED) {
+                                setTimeout(() => handleEnded(), 100);
+                            }
+                        },
+                        onError: (e) => {
+                            console.error("YouTube 플레이어 오류:", e);
+                            // 에러 시 다음 영상으로
+                            setTimeout(() => handleEnded(), 100);
+                        },
+                    },
+                });
+            } catch (error) {
+                console.error("YouTube 플레이어 생성 오류:", error);
+            }
+        };
+
+        // 약간의 지연을 두고 플레이어 생성
+        const timer = setTimeout(createPlayer, 100);
+        
+        return () => {
+            clearTimeout(timer);
+        };
     }, [current && current.type === "youtube" ? current.youtubeId : null]);
 
+    // 탭 변경 시 검색어 초기화
     useEffect(() => {
-        if (!current && items.length) setCurrentId(items[0].id);
-    }, [current, items]);
+        setQuery("");
+    }, [tab]);
+
+    // items 변경 시 currentId 유효성 검사 및 설정
+    useEffect(() => {
+        if (items.length === 0) {
+            setCurrentId(null);
+            return;
+        }
+
+        // currentId가 없거나 items에 해당 ID가 없으면 첫 번째 아이템으로 설정
+        if (!currentId || !items.some(item => item && item.id === currentId)) {
+            const firstItem = items[0];
+            if (firstItem && firstItem.id) {
+                setCurrentId(firstItem.id);
+            }
+        }
+    }, [items]); // currentId 의존성 제거로 무한 루프 방지
 
     if (!authed) return <LoginGate onPass={() => setAuthed(true)} />;
 
@@ -303,20 +341,45 @@ export default function App() {
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
                     <section className="space-y-3">
                         <div className="text-base sm:text-lg font-semibold">{current ? current.title : "선택 없음"}</div>
-                        {current && (
+                        {current ? (
                             current.type === "youtube" ? (
-                                <div id="yt-player" className="w-full aspect-video rounded-xl border" />
-                            ) : (
+                                <div id="yt-player" className="w-full aspect-video rounded-xl border bg-black" />
+                            ) : current.url ? (
                                 <video
                                     ref={videoRef}
-                                    key={current.url}
+                                    key={`${current.id}-${current.url}`}
                                     src={current.url}
                                     controls
                                     autoPlay
                                     onEnded={handleEnded}
-                                    className="w-full aspect-video rounded-xl border"
+                                    className="w-full aspect-video rounded-xl border bg-black"
+                                    onError={(e) => {
+                                        console.error("비디오 로딩 오류:", e);
+                                        // 비디오 로딩 실패 시 다음 아이템으로 자동 이동
+                                        if (items && items.length > 1) {
+                                            const currentIndex = items.findIndex(item => item && item.id === current.id);
+                                            if (currentIndex >= 0) {
+                                                const nextIndex = (currentIndex + 1) % items.length;
+                                                const nextItem = items[nextIndex];
+                                                if (nextItem && nextItem.id) {
+                                                    setCurrentId(nextItem.id);
+                                                }
+                                            }
+                                        }
+                                    }}
                                 />
-                            )
+                            ) : null
+                        ) : (
+                            <div className="w-full aspect-video rounded-xl border bg-gray-100 flex items-center justify-center">
+                                <div className="text-gray-500 text-center">
+                                    <div className="text-lg mb-2">📺</div>
+                                    <div className="text-sm">
+                                        {loading ? "로딩 중..." : 
+                                         error ? "오류가 발생했습니다" : 
+                                         "재생할 영상을 선택하세요"}
+                                    </div>
+                                </div>
+                            </div>
                         )}
                     </section>
 
@@ -325,6 +388,11 @@ export default function App() {
                         <div className="overflow-auto rounded-2xl border bg-white divide-y h-[calc(100dvh-260px)] sm:h-[calc(100dvh-250px)] lg:h-[calc(100dvh-240px)]">
                             {loading && <div className="p-6 text-sm">불러오는 중…</div>}
                             {!loading && error && <div className="p-6 text-sm text-red-600">{error}</div>}
+                            {!loading && !error && items.length === 0 && (
+                                <div className="p-6 text-sm text-gray-500 text-center">
+                                    {query ? `"${query}" 검색 결과가 없습니다.` : "표시할 영상이 없습니다."}
+                                </div>
+                            )}
                             {!loading && !error && items.map((item) => {
                                 const active = current ? item.id === current.id : false;
                                 const thumb = item.thumb || (item.type === "youtube" ? ytThumb(item.youtubeId) : guessThumbFromUrl(item.url));
