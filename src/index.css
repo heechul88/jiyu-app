@@ -66,3 +66,33 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* 드래그 앤 드롭 스타일 */
+.drag-drop-zone.drag-over {
+  border-color: #3b82f6 !important;
+  background-color: #eff6ff !important;
+}
+
+.drag-drop-zone {
+  transition: all 0.2s ease;
+}
+
+/* PWA 설치 버튼 스타일 */
+.install-prompt {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+}
+
+/* 업로드된 파일 표시 스타일 */
+.uploaded-file-badge {
+  background: linear-gradient(45deg, #10b981, #059669);
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}

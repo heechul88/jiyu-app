@@ -14,6 +14,15 @@ class ErrorBoundary extends React.Component {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
     console.error('Error stack:', error.stack);
     console.error('Component stack:', errorInfo.componentStack);
+    
+    // DOM 관련 오류인지 확인
+    if (error.message && error.message.includes('removeChild')) {
+      console.error('DOM removeChild 오류 감지됨');
+    }
+    
+    // 추가 디버깅 정보
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
   }
 
   render() {
@@ -29,7 +38,22 @@ class ErrorBoundary extends React.Component {
             <button
               onClick={() => {
                 this.setState({ hasError: false, error: null });
-                window.location.reload();
+                // 페이지 새로고침 대신 부드러운 복구 시도
+                try {
+                  // YouTube 플레이어 관련 DOM 정리
+                  const ytPlayer = document.getElementById('yt-player');
+                  if (ytPlayer) {
+                    ytPlayer.innerHTML = '';
+                  }
+                  
+                  // 잠시 후 새로고침
+                  setTimeout(() => {
+                    window.location.reload();
+                  }, 500);
+                } catch (e) {
+                  console.error('복구 시도 중 오류:', e);
+                  window.location.reload();
+                }
               }}
               className="w-full py-2 rounded-lg bg-black text-white hover:bg-gray-800 transition-colors"
             >

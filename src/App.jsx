@@ -1,4 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { computeNextId } from "./utils/playlistUtils.js";
+import { selectImageFromGallery, captureImageFromCamera, selectVideoFile, setupDragAndDrop, formatFileSize } from "./utils/fileUtils.js";
+import { pwaManager } from "./utils/pwaManager.js";
 
 /**
  * App.jsx (정리/수정판)
@@ -21,36 +24,6 @@ function getBaseUrl(metaObj) {
     }
 }
 const PLAYLIST_URL = `${getBaseUrl()}playlist.json`;
-
-// --- 다음 재생 아이디 계산 (옵셔널 체이닝/널 병합 미사용 버전) ---
-export function computeNextId(list, currentId, opts) {
-    const cfg = opts || {};
-    const repeatOne = !!cfg.repeatOne;
-    const autoNext = !!cfg.autoNext;
-    if (!Array.isArray(list) || list.length === 0) return null;
-    const idx = list.findIndex((v) => v && v.id === currentId);
-    if (repeatOne) {
-        return currentId !== undefined && currentId !== null
-            ? currentId
-            : (list[0] ? list[0].id : null);
-    }
-    if (!autoNext) return null;
-    if (idx === -1) return list[0] ? list[0].id : null;
-    if (idx < list.length - 1) return list[idx + 1] ? list[idx + 1].id : null;
-    return null; // 마지막에서는 정지(루프 없음)
-}
-
-// --- 간단 테스트 (런타임에서 콘솔 확인) ---
-try {
-    (function test_computeNextId() {
-        const L = [{ id: "a" }, { id: "b" }, { id: "c" }];
-        console.assert(computeNextId(L, "a", { repeatOne: true, autoNext: true }) === "a", "repeatOne 우선 실패");
-        console.assert(computeNextId(L, "a", { repeatOne: false, autoNext: true }) === "b", "다음 이동 실패");
-        console.assert(computeNextId(L, "c", { repeatOne: false, autoNext: true }) === null, "마지막 정지 실패");
-        console.assert(computeNextId(L, "x", { repeatOne: false, autoNext: true }) === "a", "미매치 시 첫 항목 실패");
-        console.assert(computeNextId(L, "b", { repeatOne: false, autoNext: false }) === null, "autoNext=false 실패");
-    })();
-} catch {}
 
 const TABS = [
     { key: "video", label: "영상" },
@@ -84,6 +57,141 @@ function NowPlayingIcon() {
       </span>
       재생중
     </span>
+    );
+}
+
+// 파일 업로드 컴포넌트
+function FileUploadSection({ onFileAdd }) {
+    const [isUploading, setIsUploading] = useState(false);
+    const dropZoneRef = useRef(null);
+
+    useEffect(() => {
+        if (dropZoneRef.current) {
+            const cleanup = setupDragAndDrop(dropZoneRef.current, async ({ images, videos }) => {
+                console.log("드래그 앤 드롭된 파일들:", { images, videos });
+                if (images.length > 0) {
+                    handleFileUpload(images[0], 'image');
+                } else if (videos.length > 0) {
+                    handleFileUpload(videos[0], 'video');
+                }
+            });
+            return cleanup;
+        }
+    }, []);
+
+    const handleFileUpload = async (file, type) => {
+        setIsUploading(true);
+        try {
+            let fileData;
+            if (type === 'image') {
+                const reader = new FileReader();
+                fileData = await new Promise((resolve) => {
+                    reader.onload = (e) => resolve({
+                        file,
+                        dataUrl: e.target.result,
+                        name: file.name,
+                        size: file.size,
+                        type: file.type
+                    });
+                    reader.readAsDataURL(file);
+                });
+            } else {
+                fileData = {
+                    file,
+                    url: URL.createObjectURL(file),
+                    name: file.name,
+                    size: file.size,
+                    type: file.type
+                };
+            }
+            
+            console.log("파일 업로드 완료:", fileData);
+            onFileAdd(fileData, type);
+        } catch (error) {
+            console.error("파일 업로드 중 오류:", error);
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const handleGallerySelect = async () => {
+        try {
+            const imageData = await selectImageFromGallery();
+            console.log("갤러리에서 선택된 이미지:", imageData);
+            onFileAdd(imageData, 'image');
+        } catch (error) {
+            console.log("이미지 선택 취소 또는 오류:", error);
+        }
+    };
+
+    const handleCameraCapture = async () => {
+        try {
+            const imageData = await captureImageFromCamera();
+            console.log("카메라로 촬영된 이미지:", imageData);
+            onFileAdd(imageData, 'image');
+        } catch (error) {
+            console.log("사진 촬영 취소 또는 오류:", error);
+        }
+    };
+
+    const handleVideoSelect = async () => {
+        try {
+            const videoData = await selectVideoFile();
+            console.log("선택된 비디오:", videoData);
+            onFileAdd(videoData, 'video');
+        } catch (error) {
+            console.log("비디오 선택 취소 또는 오류:", error);
+        }
+    };
+
+    return (
+        <div className="bg-white rounded-xl border p-4 space-y-3">
+            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                📁 파일 추가
+                {isUploading && <span className="text-xs text-blue-500">업로드 중...</span>}
+            </h3>
+            
+            {/* 드래그 앤 드롭 영역 */}
+            <div 
+                ref={dropZoneRef}
+                className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors cursor-pointer drag-drop-zone"
+            >
+                <div className="space-y-2">
+                    <div className="text-2xl">📎</div>
+                    <p className="text-sm text-gray-600">파일을 여기로 드래그하거나 아래 버튼을 클릭하세요</p>
+                </div>
+            </div>
+
+            {/* 파일 선택 버튼들 */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                <button
+                    onClick={handleGallerySelect}
+                    disabled={isUploading}
+                    className="flex flex-col items-center gap-1 p-3 border rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                    <span className="text-xl">🖼️</span>
+                    <span className="text-xs">갤러리</span>
+                </button>
+
+                <button
+                    onClick={handleCameraCapture}
+                    disabled={isUploading}
+                    className="flex flex-col items-center gap-1 p-3 border rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                    <span className="text-xl">📷</span>
+                    <span className="text-xs">카메라</span>
+                </button>
+
+                <button
+                    onClick={handleVideoSelect}
+                    disabled={isUploading}
+                    className="flex flex-col items-center gap-1 p-3 border rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                    <span className="text-xl">🎥</span>
+                    <span className="text-xs">비디오</span>
+                </button>
+            </div>
+        </div>
     );
 }
 
@@ -143,171 +251,525 @@ export default function App() {
     const [playlist, setPlaylist] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [uploadedFiles, setUploadedFiles] = useState([]);
+    
+    // Refs
     const ytPlayerRef = useRef(null);
     const videoRef = useRef(null);
+    const ytReadyRef = useRef(false);
+    const ytPlayerContainerRef = useRef(null);
+    const cleanupTimeoutRef = useRef(null);
+    const playerCreationTimeoutRef = useRef(null);
+    const isComponentMountedRef = useRef(true);
+    const tabSwitchCountRef = useRef(0);
+
+    // 파일 업로드 핸들러
+    const handleFileAdd = useCallback((fileData, type) => {
+        console.log("파일 추가:", fileData, type);
+        
+        // 업로드된 파일을 플레이리스트 형태로 변환
+        const newItem = {
+            id: `uploaded-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            title: fileData.name || `업로드된 ${type}`,
+            type: type === 'video' ? 'file' : 'image',
+            url: fileData.url || fileData.dataUrl,
+            thumbnail: type === 'image' ? fileData.dataUrl : undefined,
+            tags: ['업로드', type],
+            uploadedFile: true,
+            fileSize: formatFileSize(fileData.size),
+            uploadDate: new Date().toISOString()
+        };
+        
+        setUploadedFiles(prev => [...prev, newItem]);
+        
+        // 현재 탭이 비디오 탭이고 비디오 파일인 경우 자동 선택
+        if (tab === "video" && type === 'video') {
+            setCurrentId(newItem.id);
+        }
+        
+        console.log("새 아이템이 플레이리스트에 추가됨:", newItem);
+    }, [tab]);
+
+    // YouTube 플레이어 정리를 위한 개선된 함수
+    const cleanupYouTubePlayer = useCallback(() => {
+        console.log("YouTube 플레이어 정리 시작");
+        
+        // 1. 플레이어 인스턴스 정리
+        if (ytPlayerRef.current) {
+            try {
+                if (typeof ytPlayerRef.current.destroy === 'function') {
+                    ytPlayerRef.current.destroy();
+                }
+            } catch (e) {
+                console.warn("플레이어 destroy 중 무시되는 오류:", e.message);
+            }
+            ytPlayerRef.current = null;
+        }
+        
+        // 2. 컨테이너 정리 - ref를 통해 안전하게 접근
+        if (ytPlayerContainerRef.current) {
+            try {
+                // innerHTML을 사용하여 안전하게 정리
+                ytPlayerContainerRef.current.innerHTML = '';
+                console.log("YouTube 컨테이너 정리 완료");
+            } catch (e) {
+                console.warn("컨테이너 정리 중 무시되는 오류:", e.message);
+            }
+        }
+        
+        console.log("YouTube 플레이어 정리 완료");
+    }, []);
+
+    // 컴포넌트 언마운트 시 flag 설정
+    useEffect(() => {
+        isComponentMountedRef.current = true;
+        return () => {
+            isComponentMountedRef.current = false;
+            // 모든 타이머 정리
+            if (cleanupTimeoutRef.current) {
+                clearTimeout(cleanupTimeoutRef.current);
+            }
+            if (playerCreationTimeoutRef.current) {
+                clearTimeout(playerCreationTimeoutRef.current);
+            }
+        };
+    }, []);
 
     useEffect(() => localStorage.setItem("vp-repeatOne", repeatOne ? "1" : "0"), [repeatOne]);
     useEffect(() => localStorage.setItem("vp-autoNext", autoNext ? "1" : "0"), [autoNext]);
 
+    // 탭 변경 시마다 플레이리스트 새로 로드
     useEffect(() => {
-        fetch(PLAYLIST_URL)
+        console.log(`탭 ${tab}으로 변경 - 플레이리스트 새로 로드 시작`);
+        setLoading(true);
+        setError("");
+        
+        fetch(PLAYLIST_URL + `?t=${Date.now()}`) // 캐시 방지
             .then((res) => res.json())
-            .then((data) => setPlaylist(Array.isArray(data) ? data : []))
-            .catch((err) => setError(`플레이리스트 로드 실패: ${err.message}`))
+            .then((data) => {
+                console.log(`플레이리스트 로드 완료 (탭: ${tab}):`, data?.length || 0, "개 항목");
+                setPlaylist(Array.isArray(data) ? data : []);
+            })
+            .catch((err) => {
+                console.error(`플레이리스트 로드 실패 (탭: ${tab}):`, err);
+                setError(`플레이리스트 로드 실패: ${err.message}`);
+            })
             .finally(() => setLoading(false));
-    }, []);
+    }, [tab]);
 
     const items = useMemo(() => {
-        if (!Array.isArray(playlist)) return [];
-        
-        const q = query.trim().toLowerCase();
-        const filteredItems = playlist
-            .filter((v) => v && typeof v === 'object') // 유효한 객체만 필터링
-            .filter((v) => (tab === "youtube" ? v.type === "youtube" : v.type === "file" || v.type === "hls"))
-            .filter((v) => {
-                if (!q) return true;
-                return (v.title || "").toLowerCase().includes(q) || (v.tags || []).some((t) => (t || "").toLowerCase().includes(q));
-            });
-        
-        return filteredItems;
-    }, [tab, query, playlist]);
+        try {
+            const allItems = [...(Array.isArray(playlist) ? playlist : []), ...uploadedFiles];
+            
+            const q = query.trim().toLowerCase();
+            const filteredItems = allItems
+                .filter((v) => v && typeof v === 'object' && v.id) // 유효한 객체만 필터링 (id 필수)
+                .filter((v) => {
+                    if (tab === "youtube") {
+                        return v.type === "youtube";
+                    } else {
+                        return v.type === "file" || v.type === "hls" || v.type === "image" || v.uploadedFile;
+                    }
+                })
+                .filter((v) => {
+                    if (!q) return true;
+                    const title = (v.title || "").toLowerCase();
+                    const tags = (v.tags || []).join(" ").toLowerCase();
+                    return title.includes(q) || tags.includes(q);
+                });
+            
+            console.log(`탭 ${tab}의 필터된 아이템 수:`, filteredItems.length, "(업로드 파일 포함)");
+            return filteredItems;
+        } catch (error) {
+            console.error("items 필터링 중 오류:", error);
+            return [];
+        }
+    }, [tab, query, playlist, uploadedFiles]);
 
     const current = useMemo(() => {
-        if (!items || items.length === 0) return null;
-        if (!currentId) return items[0];
-        return items.find((v) => v && v.id === currentId) || items[0];
+        try {
+            if (!items || items.length === 0) {
+                console.log("현재 탭에 표시할 아이템이 없음");
+                return null;
+            }
+            
+            if (!currentId) {
+                console.log("currentId가 없어서 첫 번째 아이템 반환:", items[0]?.id);
+                return items[0];
+            }
+            
+            const found = items.find((v) => v && v.id === currentId);
+            if (!found) {
+                console.log(`currentId ${currentId}에 해당하는 아이템이 없어서 첫 번째 아이템 반환:`, items[0]?.id);
+                return items[0];
+            }
+            
+            console.log("현재 선택된 아이템:", found.id);
+            return found;
+        } catch (error) {
+            console.error("current 아이템 선택 중 오류:", error);
+            return items && items.length > 0 ? items[0] : null;
+        }
     }, [items, currentId]);
 
     function handleEnded() {
-        if (repeatOne && videoRef.current) {
-            try { videoRef.current.currentTime = 0; videoRef.current.play(); } catch {}
-            return;
-        }
-        const nid = computeNextId(items, current ? current.id : null, { repeatOne, autoNext });
-        if (nid && (!current || nid !== current.id)) setCurrentId(nid);
-    }
-
-    // --- YouTube IFrame API 초기화/생명주기 ---
-    const ytReadyRef = useRef(false);
-    
-    useEffect(() => {
-        // 탭이 youtube가 아니면 플레이어 정리
-        if (tab !== "youtube") {
-            if (ytPlayerRef.current && ytPlayerRef.current.destroy) {
-                try { ytPlayerRef.current.destroy(); } catch {}
-                ytPlayerRef.current = null;
-                ytReadyRef.current = false;
-            }
-            return;
-        }
-
-        // YouTube IFrame API 로드
-        if (!window.YT) {
-            if (!document.getElementById("yt-iframe-api")) {
-                const tag = document.createElement("script");
-                tag.id = "yt-iframe-api";
-                tag.src = "https://www.youtube.com/iframe_api";
-                document.body.appendChild(tag);
+        console.log("handleEnded 호출됨");
+        console.log("현재 상태 - repeatOne:", repeatOne, "autoNext:", autoNext);
+        console.log("현재 영상 타입:", current?.type);
+        
+        try {
+            // 1. 반복 재생이 체크된 경우 - 현재 영상을 반복
+            if (repeatOne) {
+                console.log("🔄 반복 재생 모드 - 현재 영상 반복");
+                
+                // 일반 비디오 반복 재생
+                if (videoRef.current && current?.type !== "youtube") {
+                    console.log("일반 비디오 반복 재생 실행");
+                    try { 
+                        videoRef.current.currentTime = 0; 
+                        videoRef.current.play(); 
+                        console.log("✅ 일반 비디오 반복 재생 성공");
+                    } catch (error) {
+                        console.error("❌ 일반 비디오 반복 재생 중 오류:", error);
+                    }
+                    return;
+                }
+                
+                // YouTube 반복 재생
+                if (ytPlayerRef.current && current && current.type === "youtube") {
+                    console.log("YouTube 반복 재생 실행");
+                    try {
+                        ytPlayerRef.current.seekTo(0);
+                        ytPlayerRef.current.playVideo();
+                        console.log("✅ YouTube 반복 재생 성공");
+                    } catch (error) {
+                        console.error("❌ YouTube 반복 재생 중 오류:", error);
+                    }
+                    return;
+                }
             }
             
+            // 2. 자동 다음이 체크된 경우 - 다음 영상으로 이동
+            if (autoNext) {
+                console.log("➡️ 자동 다음 모드 - 다음 영상으로 이동");
+                
+                if (!current) {
+                    console.log("current가 없어서 다음 재생 건너뜀");
+                    return;
+                }
+                
+                const nid = computeNextId(items, current.id, { repeatOne: false, autoNext: true });
+                console.log("다음 재생 ID:", nid);
+                
+                if (nid && nid !== current.id) {
+                    console.log(`✅ 다음 영상으로 변경: ${current.id} -> ${nid}`);
+                    setCurrentId(nid);
+                } else {
+                    console.log("⏹️ 다음 재생할 영상이 없음 - 재생 중지");
+                }
+                return;
+            }
+            
+            // 3. 둘 다 체크되지 않은 경우 - 재생 중지
+            console.log("⏹️ 자동 기능 미설정 - 재생 중지");
+            
+        } catch (error) {
+            console.error("❌ handleEnded 실행 중 오류:", error);
+        }
+    }
+
+    // --- YouTube IFrame API 초기화/생명주기 (개선) ---
+    useEffect(() => {
+        console.log(`YouTube API 초기화 useEffect 실행: tab=${tab}`);
+        
+        // 이전 정리 작업 취소
+        if (cleanupTimeoutRef.current) {
+            clearTimeout(cleanupTimeoutRef.current);
+            cleanupTimeoutRef.current = null;
+        }
+
+        // YouTube 탭이 아닐 때 정리
+        if (tab !== "youtube") {
+            console.log("YouTube 탭이 아니므로 플레이어 정리");
+            cleanupYouTubePlayer();
+            return;
+        }
+
+        // YouTube 탭일 때 API 초기화
+        console.log("YouTube 탭이므로 API 초기화");
+        
+        if (!window.YT && !document.getElementById("yt-iframe-api")) {
+            console.log("YouTube API 스크립트 로드 시작");
+            const tag = document.createElement("script");
+            tag.id = "yt-iframe-api";
+            tag.src = "https://www.youtube.com/iframe_api";
+            document.head.appendChild(tag);
+            
             window.onYouTubeIframeAPIReady = function () {
-                console.log("YouTube API 로드 완료");
+                console.log("YouTube API 초기화 완료");
                 ytReadyRef.current = true;
             };
-        } else {
+        } else if (window.YT && window.YT.Player) {
+            console.log("YouTube API 이미 로드됨");
             ytReadyRef.current = true;
         }
 
         return () => {
-            if (tab !== "youtube" && ytPlayerRef.current && ytPlayerRef.current.destroy) {
-                try { ytPlayerRef.current.destroy(); } catch {}
-                ytPlayerRef.current = null;
-                ytReadyRef.current = false;
+            console.log("YouTube API useEffect 정리 함수 실행");
+            if (cleanupTimeoutRef.current) {
+                clearTimeout(cleanupTimeoutRef.current);
+                cleanupTimeoutRef.current = null;
             }
         };
-    }, [tab]);
+    }, [tab, cleanupYouTubePlayer]);
 
-    // YouTube 플레이어 생성 및 업데이트
+    // YouTube 플레이어 생성 (개선)
     useEffect(() => {
-        if (!(current && current.type === "youtube" && current.youtubeId)) return;
-        if (!window.YT || !ytReadyRef.current) return;
+        if (playerCreationTimeoutRef.current) {
+            clearTimeout(playerCreationTimeoutRef.current);
+            playerCreationTimeoutRef.current = null;
+        }
+
+        // 필수 조건 체크
+        if (!(current && current.type === "youtube" && current.youtubeId)) {
+            console.log("YouTube 플레이어 생성 조건 미충족 - current:", current?.type, current?.youtubeId);
+            return;
+        }
+        
+        if (tab !== "youtube") {
+            console.log("YouTube 탭이 아니므로 플레이어 생성 중단");
+            return;
+        }
+
+        console.log("YouTube 플레이어 생성 조건 확인 중...");
+        console.log("- window.YT:", !!window.YT);
+        console.log("- window.YT.Player:", !!(window.YT && window.YT.Player));
+        console.log("- ytReadyRef.current:", ytReadyRef.current);
 
         const createPlayer = () => {
             try {
-                if (ytPlayerRef.current && ytPlayerRef.current.destroy) {
-                    ytPlayerRef.current.destroy();
+                if (!isComponentMountedRef.current || tab !== "youtube") {
+                    console.log("컴포넌트 언마운트되었거나 탭이 변경되어 플레이어 생성 중단");
+                    return;
+                }
+
+                // 기존 플레이어 정리
+                cleanupYouTubePlayer();
+                
+                // 다시 한번 상태 확인
+                if (!isComponentMountedRef.current || tab !== "youtube") {
+                    return;
+                }
+
+                // ref를 통해 컨테이너에 접근
+                if (!ytPlayerContainerRef.current) {
+                    console.warn("YouTube 플레이어 컨테이너 ref를 찾을 수 없습니다");
+                    return;
                 }
                 
-                ytPlayerRef.current = new window.YT.Player("yt-player", {
+                console.log("YouTube 플레이어 생성 시작:", current.youtubeId);
+                
+                // 고유한 div 생성
+                const playerDiv = document.createElement('div');
+                playerDiv.id = `yt-player-${Date.now()}`;
+                playerDiv.style.width = '100%';
+                playerDiv.style.height = '100%';
+                ytPlayerContainerRef.current.appendChild(playerDiv);
+                
+                ytPlayerRef.current = new window.YT.Player(playerDiv.id, {
+                    height: '100%',
+                    width: '100%',
                     videoId: current.youtubeId,
                     playerVars: {
-                        autoplay: 0, // 브라우저 정책으로 인해 0으로 설정
+                        autoplay: 1, // 자동재생 활성화
                         controls: 1,
                         rel: 0,
                         modestbranding: 1,
                         playsinline: 1,
                         origin: window.location.origin,
                         mute: 0, // 음소거 해제
+                        enablejsapi: 1
                     },
                     events: {
                         onReady: (e) => {
                             console.log("YouTube 플레이어 준비 완료:", current.youtubeId);
-                            // 준비 완료 후 재생 시도
-                            setTimeout(() => {
-                                try {
-                                    e.target.playVideo();
-                                } catch (error) {
-                                    console.log("자동 재생 실패, 사용자 상호작용 필요:", error);
-                                }
-                            }, 500);
+                            console.log("플레이어 상태:", e.target.getPlayerState());
+                            
+                            if (tab === "youtube" && isComponentMountedRef.current) {
+                                // 약간의 지연 후 재생 시도 (DOM 안정화)
+                                setTimeout(() => {
+                                    try {
+                                        console.log("자동 재생 시도 중...");
+                                        
+                                        // 음소거 해제
+                                        if (e.target.isMuted()) {
+                                            e.target.unMute();
+                                            console.log("YouTube 플레이어 음소거 해제");
+                                        }
+                                        
+                                        e.target.playVideo();
+                                        console.log("YouTube 자동 재생 명령 실행 완료");
+                                        
+                                        // 재생 상태 확인
+                                        setTimeout(() => {
+                                            const state = e.target.getPlayerState();
+                                            console.log("재생 후 플레이어 상태:", state);
+                                            if (state === window.YT.PlayerState.PLAYING) {
+                                                console.log("✅ YouTube 자동 재생 성공!");
+                                            } else if (state === window.YT.PlayerState.PAUSED) {
+                                                console.log("⚠️ YouTube 재생이 일시정지됨 - 재시도");
+                                                e.target.playVideo();
+                                            }
+                                        }, 500);
+                                        
+                                    } catch (error) {
+                                        console.error("YouTube 자동 재생 실패:", error);
+                                    }
+                                }, 300);
+                            }
                         },
                         onStateChange: (e) => {
                             console.log("YouTube 플레이어 상태 변경:", e.data);
-                            // 0: ENDED, 1: PLAYING, 2: PAUSED, 3: BUFFERING, 5: CUED
-                            if (e.data === window.YT.PlayerState.ENDED) {
+                            if (e.data === window.YT.PlayerState.ENDED && tab === "youtube" && isComponentMountedRef.current) {
+                                console.log("YouTube 영상 종료, 다음 영상 재생");
                                 setTimeout(() => handleEnded(), 100);
                             }
                         },
                         onError: (e) => {
                             console.error("YouTube 플레이어 오류:", e);
-                            // 에러 시 다음 영상으로
-                            setTimeout(() => handleEnded(), 100);
+                            if (tab === "youtube" && isComponentMountedRef.current) {
+                                setTimeout(() => handleEnded(), 100);
+                            }
                         },
                     },
                 });
             } catch (error) {
-                console.error("YouTube 플레이어 생성 오류:", error);
+                console.error("YouTube 플레이어 생성 중 오류:", error);
             }
         };
 
-        // 약간의 지연을 두고 플레이어 생성
-        const timer = setTimeout(createPlayer, 100);
+        // YouTube API 상태 확인 및 플레이어 생성
+        const attemptPlayerCreation = () => {
+            if (!window.YT || !window.YT.Player) {
+                console.log("YouTube API 아직 로드되지 않음");
+                return false;
+            }
+            
+            console.log("YouTube API 준비 완료 - 플레이어 생성 진행");
+            playerCreationTimeoutRef.current = setTimeout(() => createPlayer(), 200);
+            return true;
+        };
+
+        if (!attemptPlayerCreation()) {
+            console.log("YouTube API 대기 중...");
+            let checkCount = 0;
+            const checkAPI = setInterval(() => {
+                checkCount++;
+                console.log(`YouTube API 로드 체크 ${checkCount}/50`);
+                
+                if (window.YT && window.YT.Player) {
+                    console.log("YouTube API 로드 완료!");
+                    ytReadyRef.current = true;
+                    clearInterval(checkAPI);
+                    attemptPlayerCreation();
+                } else if (checkCount > 50) {
+                    clearInterval(checkAPI);
+                    console.error("YouTube API 로드 타임아웃 - 5초 초과");
+                }
+            }, 100);
+            
+            return () => {
+                clearInterval(checkAPI);
+                if (playerCreationTimeoutRef.current) {
+                    clearTimeout(playerCreationTimeoutRef.current);
+                    playerCreationTimeoutRef.current = null;
+                }
+            };
+        }
         
         return () => {
-            clearTimeout(timer);
+            if (playerCreationTimeoutRef.current) {
+                clearTimeout(playerCreationTimeoutRef.current);
+                playerCreationTimeoutRef.current = null;
+            }
         };
-    }, [current && current.type === "youtube" ? current.youtubeId : null]);
+    }, [current && current.type === "youtube" ? current.youtubeId : null, tab, cleanupYouTubePlayer]);
 
-    // 탭 변경 시 검색어 초기화
+    // 탭 변경 시 영상 정지 및 상태 초기화
     useEffect(() => {
-        setQuery("");
-    }, [tab]);
-
-    // items 변경 시 currentId 유효성 검사 및 설정
-    useEffect(() => {
-        if (items.length === 0) {
-            setCurrentId(null);
+        tabSwitchCountRef.current += 1;
+        console.log(`탭 변경됨: ${tab} (${tabSwitchCountRef.current}번째 전환)`);
+        
+        if (!isComponentMountedRef.current) {
+            console.log("컴포넌트가 언마운트되어 탭 변경 처리 중단");
             return;
         }
-
-        // currentId가 없거나 items에 해당 ID가 없으면 첫 번째 아이템으로 설정
-        if (!currentId || !items.some(item => item && item.id === currentId)) {
-            const firstItem = items[0];
-            if (firstItem && firstItem.id) {
-                setCurrentId(firstItem.id);
+        
+        // 이전 탭의 영상 정지 및 정리
+        console.log("이전 탭의 영상 정지 시작");
+        
+        // 1. 일반 비디오 정지
+        if (videoRef.current) {
+            try {
+                videoRef.current.pause();
+                videoRef.current.currentTime = 0;
+                console.log("일반 비디오 정지 완료");
+            } catch (e) {
+                console.warn("비디오 정지 중 오류:", e);
             }
         }
-    }, [items]); // currentId 의존성 제거로 무한 루프 방지
+        
+        // 2. YouTube 플레이어 정지 및 정리
+        if (ytPlayerRef.current) {
+            try {
+                if (typeof ytPlayerRef.current.pauseVideo === 'function') {
+                    ytPlayerRef.current.pauseVideo();
+                }
+                console.log("YouTube 플레이어 정지 완료");
+            } catch (e) {
+                console.warn("YouTube 플레이어 정지 중 오류:", e);
+            }
+        }
+        
+        // 3. 플레이어 완전 정리 (탭이 변경되었을 때만)
+        if (tabSwitchCountRef.current > 1) {
+            cleanupYouTubePlayer();
+        }
+        
+        // React의 배치 업데이트를 활용하여 한 번에 상태 변경
+        React.startTransition(() => {
+            setQuery("");
+            setCurrentId(null);
+        });
+    }, [tab, cleanupYouTubePlayer]);
+
+    // items 변경 시 currentId 유효성 검사 및 첫 번째 영상 자동 선택
+    useEffect(() => {
+        try {
+            if (!isComponentMountedRef.current) return;
+            
+            if (items.length === 0) {
+                console.log("아이템이 없어서 currentId를 null로 설정");
+                setCurrentId(prevId => isComponentMountedRef.current ? null : prevId);
+                return;
+            }
+
+            // currentId가 없거나 items에 해당 ID가 없으면 첫 번째 아이템으로 설정
+            const currentExists = currentId && items.some(item => item && item.id === currentId);
+            
+            if (!currentExists) {
+                const firstItem = items[0];
+                if (firstItem && firstItem.id) {
+                    console.log(`탭 ${tab}의 첫 번째 아이템으로 자동 선택:`, firstItem.title);
+                    setCurrentId(prevId => isComponentMountedRef.current ? firstItem.id : prevId);
+                }
+            } else {
+                console.log(`탭 ${tab}에서 기존 currentId 유지:`, currentId);
+            }
+        } catch (error) {
+            console.error("items 변경 시 currentId 설정 중 오류:", error);
+        }
+    }, [items, tab]); // currentId 의존성 제거로 무한 루프 방지
 
     if (!authed) return <LoginGate onPass={() => setAuthed(true)} />;
 
@@ -317,11 +779,41 @@ export default function App() {
                 <header className="flex flex-wrap items-center justify-between gap-3">
                     <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold">내 영상 플레이어</h1>
                     <div className="flex items-center gap-4 text-sm">
-                        <label className="flex items-center gap-1">
-                            <input type="checkbox" checked={repeatOne} onChange={(e) => setRepeatOne(e.target.checked)} /> 반복
+                        <label className={`flex items-center gap-2 px-3 py-1 rounded-lg border cursor-pointer transition-colors ${
+                            repeatOne ? 'bg-orange-100 border-orange-300 text-orange-800' : 'bg-white border-gray-300 hover:bg-gray-50'
+                        }`}>
+                            <input 
+                                type="checkbox" 
+                                checked={repeatOne} 
+                                onChange={(e) => {
+                                    console.log("반복 체크박스 변경:", e.target.checked);
+                                    setRepeatOne(e.target.checked);
+                                    if (e.target.checked) {
+                                        console.log("🔄 반복 재생 모드 활성화 - 자동 다음 비활성화");
+                                        setAutoNext(false); // 반복이 활성화되면 자동다음 비활성화
+                                    }
+                                }} 
+                                className="rounded"
+                            /> 
+                            <span>🔄 반복 재생</span>
                         </label>
-                        <label className="flex items-center gap-1">
-                            <input type="checkbox" checked={autoNext} onChange={(e) => setAutoNext(e.target.checked)} /> 자동다음
+                        <label className={`flex items-center gap-2 px-3 py-1 rounded-lg border cursor-pointer transition-colors ${
+                            autoNext ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-white border-gray-300 hover:bg-gray-50'
+                        }`}>
+                            <input 
+                                type="checkbox" 
+                                checked={autoNext} 
+                                onChange={(e) => {
+                                    console.log("자동 다음 체크박스 변경:", e.target.checked);
+                                    setAutoNext(e.target.checked);
+                                    if (e.target.checked) {
+                                        console.log("➡️ 자동 다음 모드 활성화 - 반복 재생 비활성화");
+                                        setRepeatOne(false); // 자동다음이 활성화되면 반복 비활성화
+                                    }
+                                }} 
+                                className="rounded"
+                            /> 
+                            <span>➡️ 자동 다음</span>
                         </label>
                     </div>
                 </header>
@@ -330,7 +822,23 @@ export default function App() {
                     {TABS.map((t) => (
                         <button
                             key={t.key}
-                            onClick={() => setTab(t.key)}
+                            onClick={() => {
+                                console.log(`탭 클릭: ${t.key} (현재 탭: ${tab})`);
+                                try {
+                                    if (!isComponentMountedRef.current) {
+                                        console.log("컴포넌트가 언마운트되어 탭 클릭 무시");
+                                        return;
+                                    }
+                                    if (t.key !== tab) {
+                                        console.log(`탭 변경 시도: ${tab} -> ${t.key}`);
+                                        setTab(t.key);
+                                    } else {
+                                        console.log("같은 탭 클릭으로 변경 없음");
+                                    }
+                                } catch (error) {
+                                    console.error("탭 변경 중 오류:", error);
+                                }
+                            }}
                             className={`px-3 py-2 rounded-xl border text-sm ${tab === t.key ? "bg-black text-white" : "bg-white"}`}
                         >
                             {t.label}
@@ -343,7 +851,25 @@ export default function App() {
                         <div className="text-base sm:text-lg font-semibold">{current ? current.title : "선택 없음"}</div>
                         {current ? (
                             current.type === "youtube" ? (
-                                <div id="yt-player" className="w-full aspect-video rounded-xl border bg-black" />
+                                <div 
+                                    ref={ytPlayerContainerRef}
+                                    className="w-full aspect-video rounded-xl border bg-black relative cursor-pointer"
+                                    style={{ minHeight: '200px' }}
+                                    key={`youtube-player-${current.youtubeId}`}
+                                    onClick={() => {
+                                        // YouTube 플레이어가 음소거 상태면 해제
+                                        if (ytPlayerRef.current && typeof ytPlayerRef.current.isMuted === 'function') {
+                                            try {
+                                                if (ytPlayerRef.current.isMuted()) {
+                                                    ytPlayerRef.current.unMute();
+                                                    console.log("YouTube 플레이어 음소거 해제");
+                                                }
+                                            } catch (e) {
+                                                console.warn("음소거 해제 중 오류:", e);
+                                            }
+                                        }
+                                    }}
+                                />
                             ) : current.url ? (
                                 <video
                                     ref={videoRef}
@@ -351,6 +877,31 @@ export default function App() {
                                     src={current.url}
                                     controls
                                     autoPlay
+                                    muted={false}
+                                    playsInline
+                                    onLoadedData={() => {
+                                        // 비디오 로드 완료 시 자동 재생 시도
+                                        if (videoRef.current) {
+                                            console.log("비디오 로드 완료, 자동 재생 시도:", current.title);
+                                            videoRef.current.play().catch(error => {
+                                                console.log("자동 재생 실패:", error);
+                                                // 음소거 상태로 재생 시도
+                                                videoRef.current.muted = true;
+                                                videoRef.current.play().catch(e => {
+                                                    console.log("음소거 재생도 실패:", e);
+                                                });
+                                            });
+                                        }
+                                    }}
+                                    onCanPlay={() => {
+                                        // 재생 가능한 상태가 되면 자동 재생
+                                        if (videoRef.current && videoRef.current.paused) {
+                                            console.log("재생 가능 상태, 자동 재생 시도");
+                                            videoRef.current.play().catch(error => {
+                                                console.log("canPlay 자동 재생 실패:", error);
+                                            });
+                                        }
+                                    }}
                                     onEnded={handleEnded}
                                     className="w-full aspect-video rounded-xl border bg-black"
                                     onError={(e) => {
@@ -385,7 +936,8 @@ export default function App() {
 
                     <aside className="space-y-3">
                         <SearchBox value={query} onChange={setQuery} />
-                        <div className="overflow-auto rounded-2xl border bg-white divide-y h-[calc(100dvh-260px)] sm:h-[calc(100dvh-250px)] lg:h-[calc(100dvh-240px)]">
+                        <FileUploadSection onFileAdd={handleFileAdd} />
+                        <div className="overflow-auto rounded-2xl border bg-white divide-y h-[calc(100dvh-400px)] sm:h-[calc(100dvh-390px)] lg:h-[calc(100dvh-380px)]">
                             {loading && <div className="p-6 text-sm">불러오는 중…</div>}
                             {!loading && error && <div className="p-6 text-sm text-red-600">{error}</div>}
                             {!loading && !error && items.length === 0 && (
