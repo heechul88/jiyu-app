@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { computeNextId } from "./utils/playlistUtils.js";
-import { selectImageFromGallery, captureImageFromCamera, selectVideoFile, setupDragAndDrop, formatFileSize } from "./utils/fileUtils.js";
+import { formatFileSize } from "./utils/fileUtils.js";
 import { pwaManager } from "./utils/pwaManager.js";
 
 /**
@@ -60,140 +60,7 @@ function NowPlayingIcon() {
     );
 }
 
-// 파일 업로드 컴포넌트
-function FileUploadSection({ onFileAdd }) {
-    const [isUploading, setIsUploading] = useState(false);
-    const dropZoneRef = useRef(null);
-
-    useEffect(() => {
-        if (dropZoneRef.current) {
-            const cleanup = setupDragAndDrop(dropZoneRef.current, async ({ images, videos }) => {
-                console.log("드래그 앤 드롭된 파일들:", { images, videos });
-                if (images.length > 0) {
-                    handleFileUpload(images[0], 'image');
-                } else if (videos.length > 0) {
-                    handleFileUpload(videos[0], 'video');
-                }
-            });
-            return cleanup;
-        }
-    }, []);
-
-    const handleFileUpload = async (file, type) => {
-        setIsUploading(true);
-        try {
-            let fileData;
-            if (type === 'image') {
-                const reader = new FileReader();
-                fileData = await new Promise((resolve) => {
-                    reader.onload = (e) => resolve({
-                        file,
-                        dataUrl: e.target.result,
-                        name: file.name,
-                        size: file.size,
-                        type: file.type
-                    });
-                    reader.readAsDataURL(file);
-                });
-            } else {
-                fileData = {
-                    file,
-                    url: URL.createObjectURL(file),
-                    name: file.name,
-                    size: file.size,
-                    type: file.type
-                };
-            }
-            
-            console.log("파일 업로드 완료:", fileData);
-            onFileAdd(fileData, type);
-        } catch (error) {
-            console.error("파일 업로드 중 오류:", error);
-        } finally {
-            setIsUploading(false);
-        }
-    };
-
-    const handleGallerySelect = async () => {
-        try {
-            const imageData = await selectImageFromGallery();
-            console.log("갤러리에서 선택된 이미지:", imageData);
-            onFileAdd(imageData, 'image');
-        } catch (error) {
-            console.log("이미지 선택 취소 또는 오류:", error);
-        }
-    };
-
-    const handleCameraCapture = async () => {
-        try {
-            const imageData = await captureImageFromCamera();
-            console.log("카메라로 촬영된 이미지:", imageData);
-            onFileAdd(imageData, 'image');
-        } catch (error) {
-            console.log("사진 촬영 취소 또는 오류:", error);
-        }
-    };
-
-    const handleVideoSelect = async () => {
-        try {
-            const videoData = await selectVideoFile();
-            console.log("선택된 비디오:", videoData);
-            onFileAdd(videoData, 'video');
-        } catch (error) {
-            console.log("비디오 선택 취소 또는 오류:", error);
-        }
-    };
-
-    return (
-        <div className="bg-white rounded-xl border p-4 space-y-3">
-            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-                📁 파일 추가
-                {isUploading && <span className="text-xs text-blue-500">업로드 중...</span>}
-            </h3>
-            
-            {/* 드래그 앤 드롭 영역 */}
-            <div 
-                ref={dropZoneRef}
-                className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors cursor-pointer drag-drop-zone"
-            >
-                <div className="space-y-2">
-                    <div className="text-2xl">📎</div>
-                    <p className="text-sm text-gray-600">파일을 여기로 드래그하거나 아래 버튼을 클릭하세요</p>
-                </div>
-            </div>
-
-            {/* 파일 선택 버튼들 */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                <button
-                    onClick={handleGallerySelect}
-                    disabled={isUploading}
-                    className="flex flex-col items-center gap-1 p-3 border rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                >
-                    <span className="text-xl">🖼️</span>
-                    <span className="text-xs">갤러리</span>
-                </button>
-
-                <button
-                    onClick={handleCameraCapture}
-                    disabled={isUploading}
-                    className="flex flex-col items-center gap-1 p-3 border rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                >
-                    <span className="text-xl">📷</span>
-                    <span className="text-xs">카메라</span>
-                </button>
-
-                <button
-                    onClick={handleVideoSelect}
-                    disabled={isUploading}
-                    className="flex flex-col items-center gap-1 p-3 border rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                >
-                    <span className="text-xl">🎥</span>
-                    <span className="text-xs">비디오</span>
-                </button>
-            </div>
-        </div>
-    );
-}
+// File upload UI/handlers were removed per request.
 
 function SearchBox({ value, onChange }) {
     return (
@@ -251,7 +118,6 @@ export default function App() {
     const [playlist, setPlaylist] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [uploadedFiles, setUploadedFiles] = useState([]);
     
     // Refs
     const ytPlayerRef = useRef(null);
@@ -263,32 +129,7 @@ export default function App() {
     const isComponentMountedRef = useRef(true);
     const tabSwitchCountRef = useRef(0);
 
-    // 파일 업로드 핸들러
-    const handleFileAdd = useCallback((fileData, type) => {
-        console.log("파일 추가:", fileData, type);
-        
-        // 업로드된 파일을 플레이리스트 형태로 변환
-        const newItem = {
-            id: `uploaded-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            title: fileData.name || `업로드된 ${type}`,
-            type: type === 'video' ? 'file' : 'image',
-            url: fileData.url || fileData.dataUrl,
-            thumbnail: type === 'image' ? fileData.dataUrl : undefined,
-            tags: ['업로드', type],
-            uploadedFile: true,
-            fileSize: formatFileSize(fileData.size),
-            uploadDate: new Date().toISOString()
-        };
-        
-        setUploadedFiles(prev => [...prev, newItem]);
-        
-        // 현재 탭이 비디오 탭이고 비디오 파일인 경우 자동 선택
-        if (tab === "video" && type === 'video') {
-            setCurrentId(newItem.id);
-        }
-        
-        console.log("새 아이템이 플레이리스트에 추가됨:", newItem);
-    }, [tab]);
+    // File upload functionality removed.
 
     // YouTube 플레이어 정리를 위한 개선된 함수
     const cleanupYouTubePlayer = useCallback(() => {
@@ -359,7 +200,7 @@ export default function App() {
 
     const items = useMemo(() => {
         try {
-            const allItems = [...(Array.isArray(playlist) ? playlist : []), ...uploadedFiles];
+            const allItems = [...(Array.isArray(playlist) ? playlist : [])];
             
             const q = query.trim().toLowerCase();
             const filteredItems = allItems
@@ -378,13 +219,13 @@ export default function App() {
                     return title.includes(q) || tags.includes(q);
                 });
             
-            console.log(`탭 ${tab}의 필터된 아이템 수:`, filteredItems.length, "(업로드 파일 포함)");
+            console.log(`탭 ${tab}의 필터된 아이템 수:`, filteredItems.length);
             return filteredItems;
         } catch (error) {
             console.error("items 필터링 중 오류:", error);
             return [];
         }
-    }, [tab, query, playlist, uploadedFiles]);
+    }, [tab, query, playlist]);
 
     const current = useMemo(() => {
         try {
@@ -936,7 +777,7 @@ export default function App() {
 
                     <aside className="space-y-3">
                         <SearchBox value={query} onChange={setQuery} />
-                        <FileUploadSection onFileAdd={handleFileAdd} />
+                        {/* File upload section removed */}
                         <div className="overflow-auto rounded-2xl border bg-white divide-y h-[calc(100dvh-400px)] sm:h-[calc(100dvh-390px)] lg:h-[calc(100dvh-380px)]">
                             {loading && <div className="p-6 text-sm">불러오는 중…</div>}
                             {!loading && error && <div className="p-6 text-sm text-red-600">{error}</div>}
