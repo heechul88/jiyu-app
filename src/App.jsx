@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { computeNextId } from "./utils/playlistUtils.js";
-import { formatFileSize } from "./utils/fileUtils.js";
-import { pwaManager } from "./utils/pwaManager.js";
 import InstallButton from "./components/InstallButton.jsx";
 
 /**
@@ -31,27 +29,114 @@ const TABS = [
     { key: "youtube", label: "유튜브" },
 ];
 
-const ytThumb = (id) => `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+const ytThumb = (id) => {
+    // 여러 해상도의 YouTube 썸네일 옵션
+    const options = [
+        `https://img.youtube.com/vi/${id}/maxresdefault.jpg`, // 1920x1080
+        `https://img.youtube.com/vi/${id}/hqdefault.jpg`,     // 480x360
+        `https://img.youtube.com/vi/${id}/mqdefault.jpg`,     // 320x180
+        `https://img.youtube.com/vi/${id}/default.jpg`        // 120x90
+    ];
+    return options[0]; // 최고 해상도 우선
+};
 
+// 동영상 썸네일 자동 생성 함수 (개선된 버전)
+async function generateVideoThumbnail(videoUrl) {
+    return new Promise((resolve) => {
+        // CORS 문제를 피하기 위해 더 간단한 방법 사용
+        const video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        
+        const timeoutId = setTimeout(() => {
+            console.log('썸네일 생성 타임아웃');
+            resolve(null);
+        }, 5000); // 5초 타임아웃
+        
+        video.onloadedmetadata = () => {
+            // 동영상 길이의 10% 지점으로 이동
+            video.currentTime = Math.min(video.duration * 0.1, 10); // 최대 10초
+        };
+        
+        video.onseeked = () => {
+            try {
+                clearTimeout(timeoutId);
+                
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                // 적절한 크기로 설정
+                const aspectRatio = video.videoWidth / video.videoHeight;
+                canvas.width = 320;
+                canvas.height = 320 / aspectRatio;
+                
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.7);
+                console.log('썸네일 생성 성공');
+                resolve(thumbnailUrl);
+            } catch (error) {
+                clearTimeout(timeoutId);
+                console.log('썸네일 생성 실패:', error);
+                resolve(null);
+            }
+        };
+        
+        video.onerror = (error) => {
+            clearTimeout(timeoutId);
+            console.log('동영상 로드 실패:', error);
+            resolve(null);
+        };
+        
+        video.src = videoUrl;
+    });
+}
+
+// 개선된 썸네일 URL 추정 함수
 function guessThumbFromUrl(url) {
     try {
         const u = new URL(url);
         const file = u.pathname.split("/").pop();
         const base = file.replace(/\.[^.]+$/, "");
-        return `${u.origin}/thumbs/${base}.jpg`;
+        const path = u.pathname.replace(/\/[^\/]+$/, ""); // 파일명 제거한 경로
+        
+        // Google Cloud Storage 패턴
+        if (u.hostname.includes('googleapis.com') || u.hostname.includes('storage.googleapis.com')) {
+            return [
+                `https://storage.googleapis.com/gtv-videos-bucket/sample/images/${base}.jpg`,
+                `${u.origin}${path}/images/${base}.jpg`,
+                `${u.origin}${path}/thumbs/${base}.jpg`
+            ];
+        }
+        
+        // 일반적인 서버 패턴들
+        const possiblePaths = [
+            `${u.origin}${path}/thumbs/${base}.jpg`,
+            `${u.origin}${path}/thumbnails/${base}.jpg`, 
+            `${u.origin}${path}/thumb/${base}.png`,
+            `${u.origin}${path}/preview/${base}.jpg`,
+            `${u.origin}${path}/images/${base}.jpg`,
+            `${u.origin}/thumbs${path}/${base}.jpg`,
+            `${u.origin}/thumbnails${path}/${base}.jpg`,
+            `${u.origin}/images${path}/${base}.jpg`
+        ];
+        
+        return possiblePaths;
     } catch {
-        return undefined;
+        return [];
     }
 }
 
 function Badge({ children }) {
-    return <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 border">{children}</span>;
+    return <span className="px-2 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 font-medium">{children}</span>;
 }
 
 // 재생중 표시 아이콘 (깜빡이는 그린 도트)
 function NowPlayingIcon() {
     return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-600">
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-400">
       <span className="relative inline-flex h-2.5 w-2.5">
         <span className="absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75 animate-ping"></span>
         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
@@ -63,14 +148,134 @@ function NowPlayingIcon() {
 
 // File upload UI/handlers were removed per request.
 
+// 개선된 동적 썸네일 컴포넌트
+function VideoThumbnail({ item }) {
+    const [thumbnailUrl, setThumbnailUrl] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
+    
+    useEffect(() => {
+        const loadThumbnail = async () => {
+            setLoading(true);
+            setError(false);
+            
+            let thumb = item.thumb;
+            
+            try {
+                if (!thumb) {
+                    if (item.type === "youtube" && item.youtubeId) {
+                        // YouTube 썸네일 - 여러 해상도 시도
+                        thumb = ytThumb(item.youtubeId);
+                        console.log('YouTube 썸네일 사용:', thumb);
+                    } else if (item.type === "file" && item.url) {
+                        console.log('동영상 파일 썸네일 생성 시도:', item.url);
+                        
+                        // 1. 여러 추정 썸네일 URL 시도
+                        const guessedThumbs = guessThumbFromUrl(item.url);
+                        
+                        for (const guessedThumb of guessedThumbs) {
+                            try {
+                                console.log('썸네일 URL 확인 중:', guessedThumb);
+                                const response = await fetch(guessedThumb, { 
+                                    method: 'HEAD',
+                                    cache: 'no-cache'
+                                });
+                                if (response.ok) {
+                                    thumb = guessedThumb;
+                                    console.log('✅ 추정 썸네일 발견:', thumb);
+                                    break;
+                                }
+                            } catch (e) {
+                                console.log('❌ 썸네일 URL 실패:', guessedThumb);
+                            }
+                        }
+                        
+                        // 2. 추정 썸네일이 모두 실패하면 자동 생성
+                        if (!thumb) {
+                            console.log('🎬 동영상 썸네일 자동 생성 시작...');
+                            try {
+                                const generatedThumb = await generateVideoThumbnail(item.url);
+                                if (generatedThumb) {
+                                    thumb = generatedThumb;
+                                    console.log('✅ 썸네일 자동 생성 완료');
+                                } else {
+                                    console.log('❌ 썸네일 자동 생성 실패');
+                                    setError(true);
+                                }
+                            } catch (genError) {
+                                console.log('❌ 썸네일 생성 중 오류:', genError);
+                                setError(true);
+                            }
+                        }
+                    }
+                }
+                
+                setThumbnailUrl(thumb);
+            } catch (error) {
+                console.error('썸네일 로드 중 오류:', error);
+                setError(true);
+            }
+            
+            setLoading(false);
+        };
+        
+        loadThumbnail();
+    }, [item.id, item.url, item.youtubeId, item.thumb]);
+    
+    return (
+        <div className="w-20 h-14 sm:w-24 sm:h-16 md:w-28 md:h-20 rounded-lg bg-gray-800 overflow-hidden border border-gray-600 relative">
+            {loading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
+                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+            )}
+            
+            {thumbnailUrl && !loading && (
+                <img 
+                    src={thumbnailUrl} 
+                    alt={item.title}
+                    className="w-full h-full object-cover transition-opacity duration-300" 
+                    onLoad={() => console.log('✅ 썸네일 로드 완료:', item.title)}
+                    onError={(e) => {
+                        console.log('❌ 썸네일 로드 실패, 기본 아이콘 표시:', item.title);
+                        setError(true);
+                        setThumbnailUrl(null);
+                    }}
+                />
+            )}
+            
+            {(error || (!thumbnailUrl && !loading)) && (
+                <div className="w-full h-full flex flex-col items-center justify-center text-xs bg-gradient-to-br from-gray-700 to-gray-800 text-gray-300">
+                    <div className="text-lg mb-1">
+                        {item.type === "youtube" ? "📺" : 
+                         item.type === "file" ? "🎬" : 
+                         item.type === "image" ? "🖼️" : "📄"}
+                    </div>
+                    <div className="text-[10px] opacity-75">
+                        {error ? "ERROR" : "NO THUMB"}
+                    </div>
+                </div>
+            )}
+            
+            {/* 타입 표시 배지 */}
+            <div className="absolute top-1 right-1 text-xs bg-black bg-opacity-75 text-white px-1 rounded">
+                {item.type === "youtube" ? "YT" : 
+                 item.type === "file" ? "MP4" : 
+                 item.type === "image" ? "IMG" : "FILE"}
+            </div>
+        </div>
+    );
+}
+
 function SearchBox({ value, onChange }) {
     return (
-        <div className="flex items-center gap-2 p-2 border rounded-xl bg-white shadow-sm">
+        <div className="flex items-center gap-3 p-4 border border-gray-600 rounded-2xl bg-gray-800 shadow-lg glass">
+            <span className="text-gray-400">🔍</span>
             <input
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 placeholder="영상 검색 (제목/태그)"
-                className="w-full outline-none text-sm"
+                className="w-full outline-none text-sm bg-transparent text-white placeholder-gray-400"
             />
         </div>
     );
@@ -95,15 +300,31 @@ function LoginGate({ onPass }) {
     }
 
     return (
-        <div className="min-h-[100dvh] w-screen flex items-center justify-center bg-gray-50 p-4">
-            <form onSubmit={submit} className="w-full max-w-md bg-white rounded-2xl border shadow p-6 space-y-4">
-                <h1 className="text-xl font-bold">영상 재생 앱 로그인</h1>
-                <div className="space-y-2">
-                    <input value={id} onChange={(e) => setId(e.target.value)} placeholder="아이디(asd)" className="w-full border rounded-lg px-3 py-2" />
-                    <input value={pw} onChange={(e) => setPw(e.target.value)} placeholder="비밀번호(asd)" type="password" className="w-full border rounded-lg px-3 py-2" />
-                    {err && <div className="text-sm text-red-600">{err}</div>}
+        <div className="min-h-[100dvh] w-screen flex items-center justify-center bg-black p-4">
+            <form onSubmit={submit} className="w-full max-w-md bg-gray-900 rounded-2xl border border-gray-700 shadow-2xl p-8 space-y-6 glass">
+                <h1 className="text-2xl font-bold text-center gradient-text">🎬 지유 영상 플레이어</h1>
+                <div className="space-y-4">
+                    <input 
+                        value={id} 
+                        onChange={(e) => setId(e.target.value)} 
+                        placeholder="아이디(asd)" 
+                        className="w-full border border-gray-600 rounded-xl px-4 py-3 bg-gray-800 text-white placeholder-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all" 
+                    />
+                    <input 
+                        value={pw} 
+                        onChange={(e) => setPw(e.target.value)} 
+                        placeholder="비밀번호(asd)" 
+                        type="password" 
+                        className="w-full border border-gray-600 rounded-xl px-4 py-3 bg-gray-800 text-white placeholder-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all" 
+                    />
+                    {err && <div className="text-sm text-red-400 text-center">{err}</div>}
                 </div>
-                <button type="submit" className="w-full py-2 rounded-lg bg-black text-white">로그인</button>
+                <button 
+                    type="submit" 
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:from-blue-600 hover:to-purple-600 transition-all duration-300 shadow-lg neon-blue"
+                >
+                    로그인
+                </button>
             </form>
         </div>
     );
@@ -429,8 +650,11 @@ export default function App() {
                         modestbranding: 1,
                         playsinline: 1,
                         origin: window.location.origin,
-                        mute: 0, // 음소거 해제
-                        enablejsapi: 1
+                        mute: 1, // 초기 음소거로 시작 (자동재생 허용)
+                        enablejsapi: 1,
+                        fs: 1, // 전체화면 허용
+                        iv_load_policy: 3, // 주석 숨기기
+                        start: 0 // 처음부터 재생
                     },
                     events: {
                         onReady: (e) => {
@@ -438,49 +662,66 @@ export default function App() {
                             console.log("플레이어 상태:", e.target.getPlayerState());
                             
                             if (tab === "youtube" && isComponentMountedRef.current) {
-                                // 약간의 지연 후 재생 시도 (DOM 안정화)
-                                setTimeout(() => {
-                                    try {
-                                        console.log("자동 재생 시도 중...");
-                                        
-                                        // 음소거 해제
-                                        if (e.target.isMuted()) {
-                                            e.target.unMute();
-                                            console.log("YouTube 플레이어 음소거 해제");
-                                        }
-                                        
-                                        e.target.playVideo();
-                                        console.log("YouTube 자동 재생 명령 실행 완료");
-                                        
-                                        // 재생 상태 확인
-                                        setTimeout(() => {
-                                            const state = e.target.getPlayerState();
-                                            console.log("재생 후 플레이어 상태:", state);
-                                            if (state === window.YT.PlayerState.PLAYING) {
-                                                console.log("✅ YouTube 자동 재생 성공!");
-                                            } else if (state === window.YT.PlayerState.PAUSED) {
-                                                console.log("⚠️ YouTube 재생이 일시정지됨 - 재시도");
-                                                e.target.playVideo();
+                                // 즉시 재생 시도
+                                try {
+                                    console.log("즉시 자동 재생 시도...");
+                                    e.target.playVideo();
+                                    
+                                    // 1초 후 음소거 해제 시도
+                                    setTimeout(() => {
+                                        try {
+                                            if (e.target.getPlayerState() === window.YT.PlayerState.PLAYING) {
+                                                e.target.unMute();
+                                                console.log("재생 중 - 음소거 해제");
                                             }
-                                        }, 500);
-                                        
-                                    } catch (error) {
-                                        console.error("YouTube 자동 재생 실패:", error);
-                                    }
-                                }, 300);
+                                        } catch (error) {
+                                            console.log("음소거 해제 실패:", error);
+                                        }
+                                    }, 1000);
+                                    
+                                } catch (error) {
+                                    console.error("YouTube 자동 재생 실패:", error);
+                                }
                             }
                         },
                         onStateChange: (e) => {
-                            console.log("YouTube 플레이어 상태 변경:", e.data);
+                            console.log("YouTube 플레이어 상태 변경:", e.data, 
+                                e.data === window.YT.PlayerState.UNSTARTED ? "시작 안됨" :
+                                e.data === window.YT.PlayerState.ENDED ? "종료" :
+                                e.data === window.YT.PlayerState.PLAYING ? "재생중" :
+                                e.data === window.YT.PlayerState.PAUSED ? "일시정지" :
+                                e.data === window.YT.PlayerState.BUFFERING ? "버퍼링" :
+                                e.data === window.YT.PlayerState.CUED ? "준비됨" : "알 수 없음"
+                            );
+                            
+                            // 버퍼링이 너무 오래 지속되면 다음 영상으로
+                            if (e.data === window.YT.PlayerState.BUFFERING) {
+                                setTimeout(() => {
+                                    if (ytPlayerRef.current && 
+                                        ytPlayerRef.current.getPlayerState() === window.YT.PlayerState.BUFFERING) {
+                                        console.log("⚠️ 버퍼링이 너무 오래 지속됨 - 다음 영상으로 이동");
+                                        if (tab === "youtube" && isComponentMountedRef.current) {
+                                            handleEnded();
+                                        }
+                                    }
+                                }, 10000); // 10초 후 체크
+                            }
+                            
                             if (e.data === window.YT.PlayerState.ENDED && tab === "youtube" && isComponentMountedRef.current) {
                                 console.log("YouTube 영상 종료, 다음 영상 재생");
                                 setTimeout(() => handleEnded(), 100);
                             }
                         },
                         onError: (e) => {
-                            console.error("YouTube 플레이어 오류:", e);
+                            console.error("YouTube 플레이어 오류:", e.data,
+                                e.data === 2 ? "잘못된 video ID" :
+                                e.data === 5 ? "HTML5 플레이어 오류" :
+                                e.data === 100 ? "영상을 찾을 수 없음" :
+                                e.data === 101 || e.data === 150 ? "임베드 허용 안됨" : "알 수 없는 오류"
+                            );
                             if (tab === "youtube" && isComponentMountedRef.current) {
-                                setTimeout(() => handleEnded(), 100);
+                                console.log("오류로 인해 다음 영상으로 이동");
+                                setTimeout(() => handleEnded(), 1000);
                             }
                         },
                     },
@@ -616,13 +857,13 @@ export default function App() {
     if (!authed) return <LoginGate onPass={() => setAuthed(true)} />;
 
     return (
-        <div className="min-h-[100dvh] w-screen bg-gray-50 p-3 sm:p-4 lg:p-6">
-            <div className="w-full space-y-4">
-                <header className="flex flex-wrap items-center justify-between gap-3">
-                    <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold">내 영상 플레이어</h1>
+        <div className="min-h-[100dvh] w-screen bg-black p-3 sm:p-4 lg:p-6 fade-in">
+            <div className="w-full space-y-6">
+                <header className="flex flex-wrap items-center justify-between gap-4 glass rounded-2xl p-6">
+                    <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold gradient-text">🎬 지유 영상 플레이어</h1>
                     <div className="flex items-center gap-4 text-sm">
-                        <label className={`flex items-center gap-2 px-3 py-1 rounded-lg border cursor-pointer transition-colors ${
-                            repeatOne ? 'bg-orange-100 border-orange-300 text-orange-800' : 'bg-white border-gray-300 hover:bg-gray-50'
+                        <label className={`flex items-center gap-2 px-4 py-2 rounded-xl border cursor-pointer transition-all duration-300 ${
+                            repeatOne ? 'bg-gradient-to-r from-orange-500 to-red-500 border-orange-400 text-white shadow-lg neon-orange' : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700 hover:border-gray-500'
                         }`}>
                             <input 
                                 type="checkbox" 
@@ -639,8 +880,8 @@ export default function App() {
                             /> 
                             <span>🔄 반복 재생</span>
                         </label>
-                        <label className={`flex items-center gap-2 px-3 py-1 rounded-lg border cursor-pointer transition-colors ${
-                            autoNext ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-white border-gray-300 hover:bg-gray-50'
+                        <label className={`flex items-center gap-2 px-4 py-2 rounded-xl border cursor-pointer transition-all duration-300 ${
+                            autoNext ? 'bg-gradient-to-r from-blue-500 to-purple-500 border-blue-400 text-white shadow-lg neon-blue' : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700 hover:border-gray-500'
                         }`}>
                             <input 
                                 type="checkbox" 
@@ -660,7 +901,7 @@ export default function App() {
                     </div>
                 </header>
 
-                <nav className="flex gap-2">
+                <nav className="flex gap-3">
                     {TABS.map((t) => (
                         <button
                             key={t.key}
@@ -681,21 +922,31 @@ export default function App() {
                                     console.error("탭 변경 중 오류:", error);
                                 }
                             }}
-                            className={`px-3 py-2 rounded-xl border text-sm ${tab === t.key ? "bg-black text-white" : "bg-white"}`}
+                            className={`px-6 py-3 rounded-xl border text-sm font-medium transition-all duration-300 ${
+                                tab === t.key 
+                                    ? "bg-gradient-to-r from-blue-500 to-purple-500 text-white border-blue-400 shadow-lg neon-blue" 
+                                    : "bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700 hover:border-gray-500 hover:text-white"
+                            }`}
                         >
                             {t.label}
                         </button>
                     ))}
                 </nav>
 
-                <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
-                    <section className="space-y-3">
-                        <div className="text-base sm:text-lg font-semibold">{current ? current.title : "선택 없음"}</div>
+                <div className="grid grid-cols-1 gap-8 lg:grid-cols-[2fr_1fr]">
+                    <section className="space-y-4">
+                        <div className="text-lg sm:text-xl font-bold text-white text-center lg:text-left">
+                            {current ? (
+                                <span className="gradient-text">{current.title}</span>
+                            ) : (
+                                <span className="text-gray-400">재생할 영상을 선택하세요</span>
+                            )}
+                        </div>
                         {current ? (
                             current.type === "youtube" ? (
                                 <div 
                                     ref={ytPlayerContainerRef}
-                                    className="w-full aspect-video rounded-xl border bg-black relative cursor-pointer"
+                                    className="w-full aspect-video rounded-2xl border-2 border-gray-700 bg-black relative cursor-pointer overflow-hidden shadow-2xl"
                                     style={{ minHeight: '200px' }}
                                     key={`youtube-player-${current.youtubeId}`}
                                     onClick={() => {
@@ -745,7 +996,7 @@ export default function App() {
                                         }
                                     }}
                                     onEnded={handleEnded}
-                                    className="w-full aspect-video rounded-xl border bg-black"
+                                    className="w-full aspect-video rounded-2xl border-2 border-gray-700 bg-black shadow-2xl"
                                     onError={(e) => {
                                         console.error("비디오 로딩 오류:", e);
                                         // 비디오 로딩 실패 시 다음 아이템으로 자동 이동
@@ -763,10 +1014,10 @@ export default function App() {
                                 />
                             ) : null
                         ) : (
-                            <div className="w-full aspect-video rounded-xl border bg-gray-100 flex items-center justify-center">
-                                <div className="text-gray-500 text-center">
-                                    <div className="text-lg mb-2">📺</div>
-                                    <div className="text-sm">
+                            <div className="w-full aspect-video rounded-2xl border-2 border-gray-700 bg-gray-900 flex items-center justify-center glass">
+                                <div className="text-gray-400 text-center">
+                                    <div className="text-4xl mb-4">🎬</div>
+                                    <div className="text-lg font-medium">
                                         {loading ? "로딩 중..." : 
                                          error ? "오류가 발생했습니다" : 
                                          "재생할 영상을 선택하세요"}
@@ -776,46 +1027,39 @@ export default function App() {
                         )}
                     </section>
 
-                    <aside className="space-y-3">
+                    <aside className="space-y-4">
                         <SearchBox value={query} onChange={setQuery} />
                         {/* File upload section removed */}
-                        <div className="overflow-auto rounded-2xl border bg-white divide-y h-[calc(100dvh-400px)] sm:h-[calc(100dvh-390px)] lg:h-[calc(100dvh-380px)]">
-                            {loading && <div className="p-6 text-sm">불러오는 중…</div>}
-                            {!loading && error && <div className="p-6 text-sm text-red-600">{error}</div>}
+                        <div className="overflow-auto rounded-2xl border border-gray-700 bg-gray-900 divide-y divide-gray-700 h-[calc(100dvh-400px)] sm:h-[calc(100dvh-390px)] lg:h-[calc(100dvh-380px)] glass">
+                            {loading && <div className="p-6 text-sm text-gray-300">불러오는 중…</div>}
+                            {!loading && error && <div className="p-6 text-sm text-red-400">{error}</div>}
                             {!loading && !error && items.length === 0 && (
-                                <div className="p-6 text-sm text-gray-500 text-center">
+                                <div className="p-6 text-sm text-gray-400 text-center">
                                     {query ? `"${query}" 검색 결과가 없습니다.` : "표시할 영상이 없습니다."}
                                 </div>
                             )}
                             {!loading && !error && items.map((item) => {
                                 const active = current ? item.id === current.id : false;
-                                const thumb = item.thumb || (item.type === "youtube" ? ytThumb(item.youtubeId) : guessThumbFromUrl(item.url));
                                 return (
                                     <button
                                         key={item.id}
                                         aria-current={active ? "true" : "false"}
                                         title={active ? "현재 재생중" : "재생"}
                                         onClick={() => setCurrentId(item.id)}
-                                        className={`w-full flex gap-3 items-center p-3 pl-2 transition ${
+                                        className={`w-full flex gap-3 items-center p-4 transition-all duration-300 ${
                                             active
-                                                ? "bg-green-50 border-l-4 border-green-500"
-                                                : "hover:bg-gray-50 border-l-4 border-transparent"
+                                                ? "bg-gradient-to-r from-green-600 to-blue-600 border-l-4 border-green-400 text-white neon-green"
+                                                : "hover:bg-gray-800 border-l-4 border-transparent text-gray-300 hover:text-white"
                                         }`}
                                     >
-                                        <div className="w-20 h-14 sm:w-24 sm:h-16 md:w-28 md:h-20 rounded bg-gray-100 overflow-hidden">
-                                            {thumb ? (
-                                                <img src={thumb} alt="" className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="w-full h-full grid place-items-center text-xs text-gray-400">NO THUMB</div>
-                                            )}
-                                        </div>
+                                        <VideoThumbnail item={item} />
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
                                                 <div className="font-medium truncate">{item.title}</div>
                                                 {active && <NowPlayingIcon />}
                                             </div>
-                                            <div className="text-xs text-gray-500 flex gap-2 mt-0.5">
-                                                <span>{(item.type || "").toUpperCase()}</span>
+                                            <div className="text-xs text-gray-400 flex gap-2 mt-1">
+                                                <span className="font-semibold">{(item.type || "").toUpperCase()}</span>
                                                 {(item.tags || []).slice(0, 3).map((t) => <Badge key={t}>#{t}</Badge>)}
                                             </div>
                                         </div>
@@ -826,7 +1070,9 @@ export default function App() {
                     </aside>
                 </div>
 
-                <footer className="mt-2 text-xs text-gray-500">© 2025 Video Player • React + Tailwind</footer>
+                <footer className="mt-6 text-center text-gray-400 text-sm">
+                    <div className="gradient-text font-semibold">© 2025 지유 영상 플레이어 • React + Tailwind</div>
+                </footer>
             </div>
             <InstallButton />
         </div>

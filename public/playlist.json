@@ -4,14 +4,30 @@
     "title": "샘플 비디오 01 (Big Buck Bunny)",
     "type": "file",
     "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    "thumb": "https://storage.googleapis.com/gtv-videos-bucket/sample/images/BigBuckBunny.jpg",
     "tags": ["Sample", "MP4"]
   },
   {
-    "id": "sample-mp4-2",
+    "id": "sample-mp4-2", 
     "title": "샘플 비디오 02 (Elephant Dream)",
     "type": "file",
     "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+    "thumb": "https://storage.googleapis.com/gtv-videos-bucket/sample/images/ElephantsDream.jpg",
     "tags": ["Sample", "MP4"]
+  },
+  {
+    "id": "sample-mp4-3",
+    "title": "샘플 비디오 03 (For Bigger Blazes)",
+    "type": "file", 
+    "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+    "tags": ["Sample", "MP4", "Auto-Generate"]
+  },
+  {
+    "id": "sample-mp4-4",
+    "title": "샘플 비디오 04 (Subaru Outback)",
+    "type": "file",
+    "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4", 
+    "tags": ["Sample", "MP4", "Auto-Generate"]
   },
   {
     "id": "yt-1",
