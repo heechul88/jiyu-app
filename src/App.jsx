@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import { computeNextId } from "./utils/playlistUtils.js";
 import { formatFileSize } from "./utils/fileUtils.js";
 import { pwaManager } from "./utils/pwaManager.js";
+import InstallButton from "./components/InstallButton.jsx";
 
 /**
  * App.jsx (정리/수정판)
@@ -827,6 +828,7 @@ export default function App() {
 
                 <footer className="mt-2 text-xs text-gray-500">© 2025 Video Player • React + Tailwind</footer>
             </div>
+            <InstallButton />
         </div>
     );
 }
