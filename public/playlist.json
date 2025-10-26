@@ -1,88 +1,77 @@
 [
   {
     "id": "sample-mp4-1",
-    "title": "샘플 비디오 01 (Big Buck Bunny)",
+    "title": "지유1",
     "type": "file",
-    "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-    "thumb": "https://storage.googleapis.com/gtv-videos-bucket/sample/images/BigBuckBunny.jpg",
+    "url": "https://dnabi.co.kr/movies/1.mp4",
+    "thumb": "https://via.placeholder.com/320x180/333/fff?text=지유1",
     "tags": ["Sample", "MP4"]
   },
   {
-    "id": "sample-mp4-2", 
-    "title": "샘플 비디오 02 (Elephant Dream)",
+    "id": "sample-mp4-2",
+    "title": "지유2",
     "type": "file",
-    "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-    "thumb": "https://storage.googleapis.com/gtv-videos-bucket/sample/images/ElephantsDream.jpg",
+    "url": "https://dnabi.co.kr/movies/2.mp4",
+    "thumb": "https://via.placeholder.com/320x180/444/fff?text=지유2",
     "tags": ["Sample", "MP4"]
   },
   {
     "id": "sample-mp4-3",
-    "title": "샘플 비디오 03 (For Bigger Blazes)",
-    "type": "file", 
-    "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-    "tags": ["Sample", "MP4", "Auto-Generate"]
+    "title": "지유3",
+    "type": "file",
+    "url": "https://dnabi.co.kr/movies/3.mp4",
+    "thumb": "https://via.placeholder.com/320x180/555/fff?text=지유3",
+    "tags": ["Sample", "MP4"]
   },
   {
     "id": "sample-mp4-4",
-    "title": "샘플 비디오 04 (Subaru Outback)",
+    "title": "지유4",
     "type": "file",
-    "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4", 
-    "tags": ["Sample", "MP4", "Auto-Generate"]
+    "url": "https://dnabi.co.kr/movies/4.mp4",
+    "thumb": "https://via.placeholder.com/320x180/666/fff?text=지유4",
+    "tags": ["Sample", "MP4"]
+  },
+  {
+    "id": "sample-mp4-5",
+    "title": "지유5",
+    "type": "file",
+    "url": "https://dnabi.co.kr/movies/5.mp4",
+    "thumb": "https://via.placeholder.com/320x180/777/fff?text=지유5",
+    "tags": ["Sample", "MP4"]
   },
   {
     "id": "yt-1",
-    "title": "YouTube: 바다 풍경 4K",
+    "title": "도망쳐! 대왕 상어가 나타났어요!\uD83E\uDD88 | 아기상어와 뚜루루뚜루\uD83C\uDFB6 | 상어가족 인기 동요 | 핑크퐁! 아기상어 올리",
     "type": "youtube",
-    "youtubeId": "Scxs7L0vhZ4",
+    "youtubeId": "rldTJLn35fk",
     "tags": ["YouTube", "4K"]
   },
   {
     "id": "yt-2",
-    "title": "YouTube: 코딩 뮤직",
+    "title": "모든 버전의 상어가족 모두모두 모여라! | +모음집 | 아기상어 스페셜★ | 록스타 아기상어, 1.5배속 아기상어, 한여름의 아기상어 등 | 상어가족 | 핑크퐁! 인기동요",
     "type": "youtube",
-    "youtubeId": "qoT8L9eiPMI",
+    "youtubeId": "4OdWyq5hq_g",
     "tags": ["YouTube", "LoFi"]
   },
   {
     "id": "yt-3",
-    "title": "YouTube: 코딩 뮤직",
+    "title": "도둑 상어가족을 잡아라 \uD83D\uDDA4 | 상어가족 숨바꼭질 | 아기상어 뚜루루뚜루 | 상어가족 인기 동요 모음 | 가을 인기 동요 모음 | 핑크퐁! 아기상어 올리",
     "type": "youtube",
-    "youtubeId": "jfKfPfyJRdk",
+    "youtubeId": "DR2S2PK9XBw",
     "tags": ["YouTube", "LoFi"]
   },
   {
     "id": "yt-4",
-    "title": "YouTube: 코딩 뮤직",
+    "title": "어느 날 할로윈 밤에 마녀 상어가족이 나타났어요! \uD83C\uDF83ㅣ+모음집ㅣ할로윈 좀비 상어, 할로윈 버스, 춤발라 카춤발라 외ㅣ할로윈 동요ㅣ핑크퐁! 인기동요",
     "type": "youtube",
-    "youtubeId": "jfKfPfyJRdk",
+    "youtubeId": "Sm_MUpOSez8",
     "tags": ["YouTube", "LoFi"]
   },
   {
     "id": "yt-5",
-    "title": "YouTube: 코딩 뮤직",
+    "title": "도둑을 잡아라! 경찰 특공대 출동\uD83D\uDC6E\uD83C\uDFFB\u200D♂\uFE0F\uD83D\uDEA8경찰차 동요 | +모음집 | 잠시 검문이 있겠습니다, 내 사이렌 어디 갔나 외 | 자동차 동요 | 핑크퐁! 인기동요",
     "type": "youtube",
-    "youtubeId": "jfKfPfyJRdk",
-    "tags": ["YouTube", "LoFi"]
-  },
-  {
-    "id": "yt-6",
-    "title": "YouTube: 코딩 뮤직",
-    "type": "youtube",
-    "youtubeId": "jfKfPfyJRdk",
-    "tags": ["YouTube", "LoFi"]
-  },
-  {
-    "id": "yt-7",
-    "title": "YouTube: 코딩 뮤직",
-    "type": "youtube",
-    "youtubeId": "jfKfPfyJRdk",
-    "tags": ["YouTube", "LoFi"]
-  },
-  {
-    "id": "yt-8",
-    "title": "YouTube: 코딩 뮤직",
-    "type": "youtube",
-    "youtubeId": "jfKfPfyJRdk",
+    "youtubeId": "T-5OP038Ikw",
     "tags": ["YouTube", "LoFi"]
   }
 ]

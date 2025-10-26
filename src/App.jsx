@@ -40,24 +40,38 @@ const ytThumb = (id) => {
     return options[0]; // 최고 해상도 우선
 };
 
-// 동영상 썸네일 자동 생성 함수 (개선된 버전)
+// 동영상 썸네일 자동 생성 함수 (CORS 완전 우회 버전)
 async function generateVideoThumbnail(videoUrl) {
     return new Promise((resolve) => {
-        // CORS 문제를 피하기 위해 더 간단한 방법 사용
+        // CORS 문제가 있는 URL은 즉시 포기하고 기본 처리
+        try {
+            const url = new URL(videoUrl);
+            if (url.hostname.includes('dnabi.co.kr')) {
+                console.log('⚠️ CORS 제한 도메인 감지 - 썸네일 생성 생략');
+                resolve(null);
+                return;
+            }
+        } catch (e) {
+            console.log('❌ URL 파싱 실패:', e.message);
+            resolve(null);
+            return;
+        }
+
         const video = document.createElement('video');
-        video.crossOrigin = 'anonymous';
+        
+        // CORS 설정 없이 시도
         video.muted = true;
         video.playsInline = true;
         video.preload = 'metadata';
         
         const timeoutId = setTimeout(() => {
-            console.log('썸네일 생성 타임아웃');
+            console.log('⏰ 썸네일 생성 타임아웃 - 기본 썸네일 사용');
             resolve(null);
-        }, 5000); // 5초 타임아웃
+        }, 5000); // 5초로 단축
         
         video.onloadedmetadata = () => {
             // 동영상 길이의 10% 지점으로 이동
-            video.currentTime = Math.min(video.duration * 0.1, 10); // 최대 10초
+            video.currentTime = Math.min(video.duration * 0.1, 10);
         };
         
         video.onseeked = () => {
@@ -75,21 +89,22 @@ async function generateVideoThumbnail(videoUrl) {
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
                 const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.7);
-                console.log('썸네일 생성 성공');
+                console.log('✅ 썸네일 생성 성공');
                 resolve(thumbnailUrl);
             } catch (error) {
                 clearTimeout(timeoutId);
-                console.log('썸네일 생성 실패:', error);
+                console.log('❌ Canvas 썸네일 생성 실패:', error.message);
                 resolve(null);
             }
         };
         
         video.onerror = (error) => {
             clearTimeout(timeoutId);
-            console.log('동영상 로드 실패:', error);
+            console.log('❌ 동영상 로드 실패 (CORS 가능성 높음):', error);
             resolve(null);
         };
-        
+
+        // 로드 시작
         video.src = videoUrl;
     });
 }
@@ -101,6 +116,18 @@ function guessThumbFromUrl(url) {
         const file = u.pathname.split("/").pop();
         const base = file.replace(/\.[^.]+$/, "");
         const path = u.pathname.replace(/\/[^\/]+$/, ""); // 파일명 제거한 경로
+        
+        // dnabi.co.kr 전용 패턴
+        if (u.hostname.includes('dnabi.co.kr')) {
+            return [
+                `${u.origin}/thumbs${path}/${base}.jpg`,
+                `${u.origin}/thumbnails${path}/${base}.jpg`, 
+                `${u.origin}${path}/thumb/${base}.jpg`,
+                `${u.origin}${path}/thumbs/${base}.jpg`,
+                `${u.origin}/images${path}/${base}.jpg`,
+                `${u.origin}${path}/preview/${base}.jpg`
+            ];
+        }
         
         // Google Cloud Storage 패턴
         if (u.hostname.includes('googleapis.com') || u.hostname.includes('storage.googleapis.com')) {
@@ -170,42 +197,54 @@ function VideoThumbnail({ item }) {
                     } else if (item.type === "file" && item.url) {
                         console.log('동영상 파일 썸네일 생성 시도:', item.url);
                         
-                        // 1. 여러 추정 썸네일 URL 시도
-                        const guessedThumbs = guessThumbFromUrl(item.url);
-                        
-                        for (const guessedThumb of guessedThumbs) {
-                            try {
-                                console.log('썸네일 URL 확인 중:', guessedThumb);
-                                const response = await fetch(guessedThumb, { 
-                                    method: 'HEAD',
-                                    cache: 'no-cache'
-                                });
-                                if (response.ok) {
-                                    thumb = guessedThumb;
-                                    console.log('✅ 추정 썸네일 발견:', thumb);
-                                    break;
+                        // 1. CORS 문제 도메인 확인
+                        try {
+                            const videoUrl = new URL(item.url);
+                            if (videoUrl.hostname.includes('dnabi.co.kr')) {
+                                console.log('⚠️ CORS 제한 도메인 - 썸네일 생성 생략하고 기본 아이콘 사용');
+                                thumb = null; // 기본 아이콘 표시
+                            } else {
+                                // 2. 여러 추정 썸네일 URL 시도 (CORS 안전한 도메인만)
+                                const guessedThumbs = guessThumbFromUrl(item.url);
+                                
+                                for (const guessedThumb of guessedThumbs) {
+                                    try {
+                                        console.log('썸네일 URL 확인 중:', guessedThumb);
+                                        const response = await fetch(guessedThumb, { 
+                                            method: 'HEAD',
+                                            cache: 'no-cache'
+                                        });
+                                        if (response.ok) {
+                                            thumb = guessedThumb;
+                                            console.log('✅ 추정 썸네일 발견:', thumb);
+                                            break;
+                                        }
+                                    } catch (e) {
+                                        console.log('❌ 썸네일 URL 실패:', guessedThumb);
+                                    }
                                 }
-                            } catch (e) {
-                                console.log('❌ 썸네일 URL 실패:', guessedThumb);
-                            }
-                        }
-                        
-                        // 2. 추정 썸네일이 모두 실패하면 자동 생성
-                        if (!thumb) {
-                            console.log('🎬 동영상 썸네일 자동 생성 시작...');
-                            try {
-                                const generatedThumb = await generateVideoThumbnail(item.url);
-                                if (generatedThumb) {
-                                    thumb = generatedThumb;
-                                    console.log('✅ 썸네일 자동 생성 완료');
-                                } else {
-                                    console.log('❌ 썸네일 자동 생성 실패');
-                                    setError(true);
+                                
+                                // 3. 추정 썸네일이 모두 실패하면 자동 생성 시도
+                                if (!thumb) {
+                                    console.log('🎬 동영상 썸네일 자동 생성 시작...');
+                                    try {
+                                        const generatedThumb = await generateVideoThumbnail(item.url);
+                                        if (generatedThumb && generatedThumb !== 'VIDEO_ELEMENT') {
+                                            thumb = generatedThumb;
+                                            console.log('✅ 썸네일 자동 생성 완료');
+                                        } else {
+                                            console.log('❌ 썸네일 자동 생성 실패 - 기본 썸네일 사용');
+                                            thumb = null; // 기본 아이콘 표시
+                                        }
+                                    } catch (genError) {
+                                        console.log('❌ 썸네일 생성 중 오류:', genError);
+                                        thumb = null; // 오류 시 아이콘 표시
+                                    }
                                 }
-                            } catch (genError) {
-                                console.log('❌ 썸네일 생성 중 오류:', genError);
-                                setError(true);
                             }
+                        } catch (urlError) {
+                            console.log('❌ URL 파싱 오류:', urlError);
+                            thumb = null;
                         }
                     }
                 }
@@ -237,7 +276,7 @@ function VideoThumbnail({ item }) {
                     className="w-full h-full object-cover transition-opacity duration-300" 
                     onLoad={() => console.log('✅ 썸네일 로드 완료:', item.title)}
                     onError={(e) => {
-                        console.log('❌ 썸네일 로드 실패, 기본 아이콘 표시:', item.title);
+                        console.log('❌ 썸네일 이미지 로드 실패, 기본 아이콘 표시:', item.title);
                         setError(true);
                         setThumbnailUrl(null);
                     }}
@@ -251,8 +290,8 @@ function VideoThumbnail({ item }) {
                          item.type === "file" ? "🎬" : 
                          item.type === "image" ? "🖼️" : "📄"}
                     </div>
-                    <div className="text-[10px] opacity-75">
-                        {error ? "ERROR" : "NO THUMB"}
+                    <div className="text-[10px] opacity-75 text-center">
+                        {error ? "THUMB\nERROR" : "LOADING\nTHUMB"}
                     </div>
                 </div>
             )}
@@ -335,11 +374,28 @@ export default function App() {
     const [tab, setTab] = useState("video");
     const [query, setQuery] = useState("");
     const [currentId, setCurrentId] = useState(null);
-    const [repeatOne, setRepeatOne] = useState(() => localStorage.getItem("vp-repeatOne") === "1");
-    const [autoNext, setAutoNext] = useState(() => localStorage.getItem("vp-autoNext") !== "0");
+    const [repeatOne, setRepeatOne] = useState(() => {
+        try {
+            return localStorage.getItem("vp-repeatOne") === "1";
+        } catch {
+            return false;
+        }
+    });
+    const [autoNext, setAutoNext] = useState(() => {
+        try {
+            return localStorage.getItem("vp-autoNext") !== "0";
+        } catch {
+            return true;
+        }
+    });
     const [playlist, setPlaylist] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const shouldRestoreFullscreen = useRef(false);
+    const fullscreenRestoreTimeout = useRef(null);
+    const fullscreenCheckInterval = useRef(null);
+    const [youtubeRandomSeed, setYoutubeRandomSeed] = useState(() => Math.random());
     
     // Refs
     const ytPlayerRef = useRef(null);
@@ -401,6 +457,14 @@ export default function App() {
     useEffect(() => localStorage.setItem("vp-repeatOne", repeatOne ? "1" : "0"), [repeatOne]);
     useEffect(() => localStorage.setItem("vp-autoNext", autoNext ? "1" : "0"), [autoNext]);
 
+    // YouTube 탭 전환 시 랜덤 시드 재생성
+    useEffect(() => {
+        if (tab === "youtube") {
+            setYoutubeRandomSeed(Math.random());
+            console.log("🎲 YouTube 탭 전환 - 새로운 랜덤 시드 생성");
+        }
+    }, [tab]);
+
     // 탭 변경 시마다 플레이리스트 새로 로드
     useEffect(() => {
         console.log(`탭 ${tab}으로 변경 - 플레이리스트 새로 로드 시작`);
@@ -420,12 +484,30 @@ export default function App() {
             .finally(() => setLoading(false));
     }, [tab]);
 
+    // 랜덤 셔플 함수 (시드 기반)
+    const shuffleArray = useCallback((array, seed) => {
+        const shuffled = [...array];
+        let random = seed;
+        
+        // 간단한 시드 기반 랜덤 함수 (Linear Congruential Generator)
+        const seededRandom = () => {
+            random = (random * 9301 + 49297) % 233280;
+            return random / 233280;
+        };
+        
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(seededRandom() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled;
+    }, []);
+
     const items = useMemo(() => {
         try {
             const allItems = [...(Array.isArray(playlist) ? playlist : [])];
             
             const q = query.trim().toLowerCase();
-            const filteredItems = allItems
+            let filteredItems = allItems
                 .filter((v) => v && typeof v === 'object' && v.id) // 유효한 객체만 필터링 (id 필수)
                 .filter((v) => {
                     if (tab === "youtube") {
@@ -441,13 +523,19 @@ export default function App() {
                     return title.includes(q) || tags.includes(q);
                 });
             
+            // YouTube 탭에서 검색어가 없을 때만 랜덤 정렬
+            if (tab === "youtube" && !q) {
+                filteredItems = shuffleArray(filteredItems, youtubeRandomSeed);
+                console.log(`🎲 YouTube 탭 - 랜덤 정렬 적용됨 (${filteredItems.length}개 항목, 시드: ${youtubeRandomSeed.toFixed(6)})`);
+            }
+            
             console.log(`탭 ${tab}의 필터된 아이템 수:`, filteredItems.length);
             return filteredItems;
         } catch (error) {
             console.error("items 필터링 중 오류:", error);
             return [];
         }
-    }, [tab, query, playlist]);
+    }, [tab, query, playlist, shuffleArray, youtubeRandomSeed]);
 
     const current = useMemo(() => {
         try {
@@ -474,6 +562,200 @@ export default function App() {
             return items && items.length > 0 ? items[0] : null;
         }
     }, [items, currentId]);
+
+    // 전체화면 상태 감지 및 관리 (전체화면 유지 전용 강화된 버전)
+    useEffect(() => {
+        const handleFullscreenChange = (e) => {
+            try {
+                const isNowFullscreen = !!(
+                    document.fullscreenElement ||
+                    document.webkitFullscreenElement ||
+                    document.mozFullScreenElement ||
+                    document.msFullscreenElement
+                );
+                
+                console.log("🖥️ 전체화면 상태 변경:", isNowFullscreen ? "ON" : "OFF");
+                console.log("🔄 복원 플래그 상태:", shouldRestoreFullscreen.current);
+                
+                setIsFullscreen(isNowFullscreen);
+                
+                // 전체화면이 해제되었을 때
+                if (!isNowFullscreen) {
+                    // 🔥 의도적인 복원 대기 중인 경우 이벤트 전파 방지
+                    if (shouldRestoreFullscreen.current) {
+                        console.log("⏳ 전체화면 복원 대기 중 - 이벤트 전파 방지");
+                        if (e && e.stopPropagation) {
+                            e.stopPropagation();
+                        }
+                        if (e && e.preventDefault) {
+                            e.preventDefault();
+                        }
+                    } else {
+                        console.log("🔄 전체화면 완전 해제됨");
+                    }
+                } else {
+                    // 전체화면으로 들어갔을 때
+                    console.log("✅ 전체화면 진입 완료");
+                    if (shouldRestoreFullscreen.current) {
+                        shouldRestoreFullscreen.current = false;
+                        console.log("🎯 전체화면 복원 완료 - 플래그 초기화");
+                        
+                        // 복원 성공 시 모니터링 중단
+                        if (fullscreenCheckInterval.current) {
+                            clearInterval(fullscreenCheckInterval.current);
+                            fullscreenCheckInterval.current = null;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("전체화면 상태 감지 오류:", error);
+            }
+        };
+
+        try {
+            // 전체화면 상태 변경 이벤트 리스너 등록 (캡처 단계에서 우선 처리)
+            document.addEventListener('fullscreenchange', handleFullscreenChange, true);
+            document.addEventListener('webkitfullscreenchange', handleFullscreenChange, true);
+            document.addEventListener('mozfullscreenchange', handleFullscreenChange, true);
+            document.addEventListener('MSFullscreenChange', handleFullscreenChange, true);
+        } catch (error) {
+            console.error("전체화면 이벤트 리스너 등록 오류:", error);
+        }
+
+        return () => {
+            try {
+                document.removeEventListener('fullscreenchange', handleFullscreenChange, true);
+                document.removeEventListener('webkitfullscreenchange', handleFullscreenChange, true);
+                document.removeEventListener('mozfullscreenchange', handleFullscreenChange, true);
+                document.removeEventListener('MSFullscreenChange', handleFullscreenChange, true);
+            } catch (error) {
+                console.error("전체화면 이벤트 리스너 제거 오류:", error);
+            }
+        };
+    }, []);
+
+    // 전체화면 요청 함수 (단순화)
+    const requestFullscreen = useCallback((element) => {
+        if (!element) return;
+        
+        try {
+            if (element.requestFullscreen) {
+                element.requestFullscreen();
+            } else if (element.webkitRequestFullscreen) {
+                element.webkitRequestFullscreen();
+            } else if (element.mozRequestFullScreen) {
+                element.mozRequestFullScreen();
+            } else if (element.msRequestFullscreen) {
+                element.msRequestFullscreen();
+            }
+        } catch (error) {
+            console.error("전체화면 요청 실패:", error);
+        }
+    }, []);
+
+    // 🔥 강력한 전체화면 복원 모니터링 (전체화면 유지 전용 개선 버전)
+    const startFullscreenRestoreMonitoring = useCallback(() => {
+        if (!shouldRestoreFullscreen.current) return;
+        
+        console.log("🔄 전체화면 복원 모니터링 시작 (강화 버전)");
+        
+        // 기존 타이머들 정리
+        if (fullscreenRestoreTimeout.current) {
+            clearTimeout(fullscreenRestoreTimeout.current);
+        }
+        if (fullscreenCheckInterval.current) {
+            clearInterval(fullscreenCheckInterval.current);
+        }
+        
+        let attemptCount = 0;
+        const maxAttempts = 50; // 최대 10초간 시도 (200ms * 50) - 더 오래 시도
+        
+        const attemptRestore = () => {
+            attemptCount++;
+            
+            const isCurrentlyFullscreen = !!(
+                document.fullscreenElement ||
+                document.webkitFullscreenElement ||
+                document.mozFullScreenElement ||
+                document.msFullscreenElement
+            );
+            
+            console.log(`🎯 전체화면 복원 시도 ${attemptCount}/${maxAttempts}, 현재 상태:`, isCurrentlyFullscreen);
+            
+            if (!isCurrentlyFullscreen && shouldRestoreFullscreen.current) {
+                // 현재 재생 중인 영상 타입에 따라 적절한 element 선택
+                let targetElement = null;
+                
+                if (current?.type === "youtube" && ytPlayerContainerRef.current) {
+                    // YouTube의 경우 iframe이 준비될 때까지 기다림
+                    const iframe = ytPlayerContainerRef.current.querySelector('iframe');
+                    if (iframe) {
+                        targetElement = iframe;
+                        console.log("📺 YouTube iframe 전체화면 복원 시도");
+                    } else {
+                        targetElement = ytPlayerContainerRef.current;
+                        console.log("📺 YouTube 컨테이너 전체화면 복원 시도");
+                    }
+                } else if (current?.type !== "youtube" && videoRef.current) {
+                    targetElement = videoRef.current;
+                    console.log("🎬 일반 비디오 전체화면 복원 시도");
+                }
+                
+                if (targetElement) {
+                    try {
+                        requestFullscreen(targetElement);
+                        
+                        // 🔥 이벤트 전파 방지 강화
+                        const preventDefault = (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        };
+                        
+                        // 일시적으로 이벤트 전파 방지
+                        document.addEventListener('fullscreenchange', preventDefault, true);
+                        setTimeout(() => {
+                            document.removeEventListener('fullscreenchange', preventDefault, true);
+                        }, 1000);
+                        
+                    } catch (error) {
+                        console.warn("전체화면 복원 시도 실패:", error);
+                    }
+                }
+            } else if (isCurrentlyFullscreen && shouldRestoreFullscreen.current) {
+                console.log("✅ 전체화면 복원 성공! 모니터링 중단");
+                shouldRestoreFullscreen.current = false;
+                clearInterval(fullscreenCheckInterval.current);
+                fullscreenCheckInterval.current = null;
+                return;
+            }
+            
+            if (attemptCount >= maxAttempts) {
+                console.log("⏰ 전체화면 복원 시도 횟수 초과 - 모니터링 중단");
+                shouldRestoreFullscreen.current = false;
+                clearInterval(fullscreenCheckInterval.current);
+                fullscreenCheckInterval.current = null;
+            }
+        };
+        
+        // 즉시 한 번 시도
+        attemptRestore();
+        
+        // 이후 더 빈번하게 시도 (전체화면 유지를 위해)
+        fullscreenCheckInterval.current = setInterval(attemptRestore, 150); // 150ms로 더 빈번하게
+        
+    }, [current, requestFullscreen]);
+
+    // 컴포넌트 언마운트 시 타이머들 정리
+    useEffect(() => {
+        return () => {
+            if (fullscreenRestoreTimeout.current) {
+                clearTimeout(fullscreenRestoreTimeout.current);
+            }
+            if (fullscreenCheckInterval.current) {
+                clearInterval(fullscreenCheckInterval.current);
+            }
+        };
+    }, []);
 
     function handleEnded() {
         console.log("handleEnded 호출됨");
@@ -526,7 +808,43 @@ export default function App() {
                 
                 if (nid && nid !== current.id) {
                     console.log(`✅ 다음 영상으로 변경: ${current.id} -> ${nid}`);
-                    setCurrentId(nid);
+                    
+                    // 전체화면 상태 확인 및 즉시 처리
+                    const wasFullscreen = isFullscreen || shouldRestoreFullscreen.current;
+                    console.log("🖥️ 전체화면 유지 필요:", wasFullscreen);
+                    
+                    if (wasFullscreen) {
+                        // 🔥 전체화면 유지를 위한 강화된 처리
+                        shouldRestoreFullscreen.current = true;
+                        console.log("🎬 전체화면 유지 모드 - 강화된 처리 시작");
+                        
+                        // YouTube 플레이어 정리 시 전체화면 해제 방지
+                        if (current?.type === "youtube") {
+                            console.log("📺 YouTube -> YouTube 전환: 플레이어 교체 최적화");
+                        }
+                        
+                        // 즉시 영상 변경 (전체화면에서는 더 빠른 전환)
+                        setCurrentId(nid);
+                        
+                        // 더 적극적인 복원 시도
+                        fullscreenRestoreTimeout.current = setTimeout(() => {
+                            console.log("🚀 전체화면 복원 모니터링 시작 (초고속 모드)");
+                            startFullscreenRestoreMonitoring();
+                        }, 100); // 100ms로 더 단축
+                        
+                        // 추가 백업 복원 시도 (더 안전한 복원)
+                        setTimeout(() => {
+                            if (shouldRestoreFullscreen.current) {
+                                console.log("🔄 백업 전체화면 복원 시도");
+                                startFullscreenRestoreMonitoring();
+                            }
+                        }, 500);
+                        
+                    } else {
+                        // 일반 모드에서는 기존대로
+                        console.log("🪟 창 모드 - 일반 전환");
+                        setCurrentId(nid);
+                    }
                 } else {
                     console.log("⏹️ 다음 재생할 영상이 없음 - 재생 중지");
                 }
@@ -694,6 +1012,15 @@ export default function App() {
                                 e.data === window.YT.PlayerState.CUED ? "준비됨" : "알 수 없음"
                             );
                             
+                            // 실제 재생 시작 시 전체화면 복원
+                            if (e.data === window.YT.PlayerState.PLAYING && shouldRestoreFullscreen.current) {
+                                console.log("▶️ YouTube 재생 시작됨 - 즉시 전체화면 복원 모니터링 시작");
+                                // 더 빠른 복원을 위해 딜레이 최소화
+                                setTimeout(() => {
+                                    startFullscreenRestoreMonitoring();
+                                }, 50); // 50ms로 더 단축
+                            }
+                            
                             // 버퍼링이 너무 오래 지속되면 다음 영상으로
                             if (e.data === window.YT.PlayerState.BUFFERING) {
                                 setTimeout(() => {
@@ -707,9 +1034,33 @@ export default function App() {
                                 }, 10000); // 10초 후 체크
                             }
                             
+                            // 🔥 전체화면에서 영상 종료 시 전용 처리
                             if (e.data === window.YT.PlayerState.ENDED && tab === "youtube" && isComponentMountedRef.current) {
-                                console.log("YouTube 영상 종료, 다음 영상 재생");
-                                setTimeout(() => handleEnded(), 100);
+                                console.log("🎬 YouTube 영상 종료 감지");
+                                
+                                // 전체화면 상태인지 확인
+                                const isCurrentlyFullscreen = !!(
+                                    document.fullscreenElement ||
+                                    document.webkitFullscreenElement ||
+                                    document.mozFullScreenElement ||
+                                    document.msFullscreenElement
+                                );
+                                
+                                if (isCurrentlyFullscreen) {
+                                    console.log("🖥️ 전체화면 모드에서 영상 종료 - 전체화면 유지 처리");
+                                    shouldRestoreFullscreen.current = true;
+                                    
+                                    // 이벤트 전파 방지를 위해 stopPropagation (가능한 경우)
+                                    if (e && e.stopPropagation) {
+                                        e.stopPropagation();
+                                    }
+                                    
+                                    // 즉시 다음 영상 처리 (딜레이 최소화)
+                                    setTimeout(() => handleEnded(), 50);
+                                } else {
+                                    console.log("🪟 창 모드에서 영상 종료 - 일반 처리");
+                                    setTimeout(() => handleEnded(), 100);
+                                }
                             }
                         },
                         onError: (e) => {
@@ -995,7 +1346,23 @@ export default function App() {
                                             });
                                         }
                                     }}
-                                    onEnded={handleEnded}
+                                    onPlaying={() => {
+                                        // 실제 재생이 시작되면 전체화면 복원
+                                        if (shouldRestoreFullscreen.current && videoRef.current) {
+                                            console.log("▶️ 일반 비디오 재생 시작됨 - 즉시 전체화면 복원 모니터링 시작");
+                                            setTimeout(() => {
+                                                startFullscreenRestoreMonitoring();
+                                            }, 100); // 100ms로 단축
+                                        }
+                                    }}
+                                    onEnded={(e) => {
+                                        // 전체화면에서 이벤트 전파 차단
+                                        if (isFullscreen) {
+                                            e.stopPropagation();
+                                            console.log("🛡️ 전체화면 모드 - 이벤트 전파 차단");
+                                        }
+                                        handleEnded();
+                                    }}
                                     className="w-full aspect-video rounded-2xl border-2 border-gray-700 bg-black shadow-2xl"
                                     onError={(e) => {
                                         console.error("비디오 로딩 오류:", e);
@@ -1029,6 +1396,22 @@ export default function App() {
 
                     <aside className="space-y-4">
                         <SearchBox value={query} onChange={setQuery} />
+                        
+                        {/* YouTube 탭에서만 보이는 셔플 버튼 */}
+                        {tab === "youtube" && !query && (
+                            <button
+                                onClick={() => {
+                                    setYoutubeRandomSeed(Math.random());
+                                    console.log("🎲 수동 셔플 버튼 클릭 - 새로운 랜덤 정렬");
+                                }}
+                                className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white font-medium transition-all duration-300 shadow-lg hover:shadow-red-500/25"
+                                title="YouTube 목록 랜덤 정렬"
+                            >
+                                <span className="text-lg">🎲</span>
+                                <span>목록 섞기</span>
+                            </button>
+                        )}
+                        
                         {/* File upload section removed */}
                         <div className="overflow-auto rounded-2xl border border-gray-700 bg-gray-900 divide-y divide-gray-700 h-[calc(100dvh-400px)] sm:h-[calc(100dvh-390px)] lg:h-[calc(100dvh-380px)] glass">
                             {loading && <div className="p-6 text-sm text-gray-300">불러오는 중…</div>}
@@ -1046,7 +1429,7 @@ export default function App() {
                                         aria-current={active ? "true" : "false"}
                                         title={active ? "현재 재생중" : "재생"}
                                         onClick={() => setCurrentId(item.id)}
-                                        className={`w-full flex gap-3 items-center p-4 transition-all duration-300 ${
+                                        className={`w-full flex gap-3 items-start p-4 transition-all duration-300 min-h-[80px] ${
                                             active
                                                 ? "bg-gradient-to-r from-green-600 to-blue-600 border-l-4 border-green-400 text-white neon-green"
                                                 : "hover:bg-gray-800 border-l-4 border-transparent text-gray-300 hover:text-white"
@@ -1054,11 +1437,11 @@ export default function App() {
                                     >
                                         <VideoThumbnail item={item} />
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <div className="font-medium truncate">{item.title}</div>
-                                                {active && <NowPlayingIcon />}
+                                            <div className="flex items-start gap-2">
+                                                <div className="font-medium text-sm leading-5 line-clamp-2 flex-1 break-words">{item.title}</div>
+                                                {active && <div className="flex-shrink-0 mt-0.5"><NowPlayingIcon /></div>}
                                             </div>
-                                            <div className="text-xs text-gray-400 flex gap-2 mt-1">
+                                            <div className="text-xs text-gray-400 flex gap-2 mt-2">
                                                 <span className="font-semibold">{(item.type || "").toUpperCase()}</span>
                                                 {(item.tags || []).slice(0, 3).map((t) => <Badge key={t}>#{t}</Badge>)}
                                             </div>
